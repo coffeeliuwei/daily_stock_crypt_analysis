@@ -651,11 +651,20 @@ class StockAnalysisPipeline:
             # Step 8: 保存分析历史
             if result:
                 try:
+                    # news_context 是 dict，需要转换为 JSON 字符串
+                    news_content_str = None
+                    if news_context:
+                        import json
+
+                        news_content_str = json.dumps(
+                            news_context, ensure_ascii=False, default=str
+                        )
+
                     self.db.save_analysis_history(
                         result=result,
                         query_id=query_id,
                         report_type=report_type.value,
-                        news_content=news_context,
+                        news_content=news_content_str,
                         context_snapshot=crypto_context,
                         save_snapshot=self.save_context_snapshot,
                     )

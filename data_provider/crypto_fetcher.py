@@ -4,14 +4,14 @@
 CryptoFetcher - 加密货币数据源 (Priority 1)
 ===================================
 
-数据来源：QVeris API（首选）-> CCXT（备用）
-特点：统一 API 网关，支持主流加密货币
-定位：为系统添加 BTC、ETH 等加密货币的数据支持
+数据来源（优先级）：
+1. CoinGecko (免费，无需API Key) - 首选
+2. Binance 公开API (免费，无需API Key) - 第二选择
+3. CCXT (需要安装库) - 第三选择
+4. QVeris API (需要API Key) - 最后备选
 
-关键策略：
-1. 首选 QVeris API 获取加密货币数据
-2. QVeris 不可用时回退到 CCXT/Binance
-3. 自动将 BTC、ETH 等符号转换为标准格式
+特点：多数据源 fallback，支持主流加密货币
+定位：为系统添加 BTC、ETH 等加密货币的数据支持
 """
 
 import logging
@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 import pandas as pd
+import requests
 
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, _is_crypto_code
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
@@ -58,7 +59,7 @@ DEFAULT_CRYPTO_SYMBOLS = [
     "ICP",
 ]
 
-# 加密货币名称映射
+# 加密货币名称映射 (Symbol -> Name)
 CRYPTO_NAMES = {
     "BTC": "Bitcoin",
     "ETH": "Ethereum",
@@ -77,46 +78,432 @@ CRYPTO_NAMES = {
     "UNI": "Uniswap",
 }
 
+# Symbol -> CoinGecko ID 映射
+COINGECKO_ID_MAP = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "BNB": "binancecoin",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "DOGE": "dogecoin",
+    "DOT": "polkadot",
+    "MATIC": "matic-network",
+    "LTC": "litecoin",
+    "SHIB": "shiba-inu",
+    "AVAX": "avalanche-2",
+    "LINK": "chainlink",
+    "ATOM": "cosmos",
+    "UNI": "uniswap",
+    "XMR": "monero",
+    "ETC": "ethereum-classic",
+    "BCH": "bitcoin-cash",
+    "NEAR": "near",
+    "APT": "aptos",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "INJ": "injective-protocol",
+    "FIL": "filecoin",
+    "VET": "vechain",
+    "HBAR": "hedera-hashgraph",
+    "ICP": "internet-computer",
+}
+
 
 class CryptoFetcher(BaseFetcher):
     """
     加密货币数据源实现
 
     优先级：1（高优先级）
-    数据来源：QVeris（首选）-> CCXT（备用）
+    数据来源：CoinGecko -> Binance -> CCXT -> QVeris
 
     关键策略：
-    - 首选 QVeris API 获取数据
-    - QVeris 不可用时回退到 CCXT
+    - 首选免费的 CoinGecko API（无需密钥）
+    - CoinGecko 失败时回退到 Binance 公开 API
+    - Binance 失败时回退到 CCXT
+    - CCXT 失败时回退到 QVeris（需 API Key）
     - 自动转换加密货币代码格式
     """
 
     name = "CryptoFetcher"
     priority = int(os.getenv("CRYPTO_PRIORITY", "1"))
 
-    # QVeris API 配置
+    # API 配置
+    COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
+    BINANCE_BASE_URL = "https://api.binance.com/api/v3"
     QVERIS_BASE_URL = "https://qveris.ai/api/v1"
-    QVERIS_TIMEOUT = 30
+    REQUEST_TIMEOUT = 15
+
+    # 速率限制（CoinGecko 免费版限制）
+    _last_coingecko_request = 0
+    COINGECKO_MIN_INTERVAL = 1.5  # 每次请求最小间隔（秒）
 
     def __init__(self, exchange: str = "binance"):
         """
         初始化 CryptoFetcher
 
         Args:
-            exchange: 备用交易所名称，默认 binance
+            exchange: CCXT 备用交易所名称，默认 binance
         """
         self.exchange_name = exchange
         self._exchange = None
         self._ccxt = None
 
-        # QVeris 配置
+        # QVeris 配置（最后备选）
         self.qveris_api_key = os.getenv("QVERIS_API_KEY")
         self._qveris_available = bool(self.qveris_api_key)
 
-        if self._qveris_available:
-            logger.info("[CryptoFetcher] QVeris API 已配置，作为首选数据源")
-        else:
-            logger.info("[CryptoFetcher] QVeris API 未配置，使用 CCXT 作为数据源")
+        # CoinGecko API Key（可选，有则速率限制更宽松）
+        self.coingecko_api_key = os.getenv("COINGECKO_API_KEY")
+
+        logger.info(
+            "[CryptoFetcher] 数据源优先级: CoinGecko(免费) -> Binance(免费) -> CCXT -> QVeris"
+        )
+
+    # ==================== CoinGecko API (首选，免费) ====================
+
+    def _fetch_via_coingecko(
+        self, stock_code: str, start_date: str, end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        通过 CoinGecko API 获取数据（首选，免费无需密钥）
+
+        Args:
+            stock_code: 加密货币代码 (BTC, ETH 等)
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+
+        Returns:
+            DataFrame 或 None
+        """
+        try:
+            # 获取 CoinGecko ID
+            coin_id = self._get_coingecko_id(stock_code)
+            if not coin_id:
+                logger.debug(f"[CoinGecko] 无法映射 {stock_code} 到 CoinGecko ID")
+                return None
+
+            # 速率限制
+            self._rate_limit_coingecko()
+
+            # 计算天数
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            days = (end_dt - start_dt).days + 1
+
+            # CoinGecko OHLC 接口限制最大 90 天
+            if days > 90:
+                logger.debug(f"[CoinGecko] 请求天数 {days} 超过 90 天限制，分段获取")
+                return self._fetch_coingecko_extended(coin_id, start_date, end_date)
+
+            # 调用 OHLC 接口
+            url = f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/ohlc"
+            params = {"vs_currency": "usd", "days": str(days)}
+
+            if self.coingecko_api_key:
+                params["x_cg_demo_api_key"] = self.coingecko_api_key
+
+            logger.debug(f"[CoinGecko] 请求 {coin_id} OHLC, days={days}")
+            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+
+            if resp.status_code == 429:
+                logger.warning("[CoinGecko] 速率限制，稍后重试")
+                time.sleep(2)
+                return None
+
+            if resp.status_code != 200:
+                logger.debug(f"[CoinGecko] HTTP {resp.status_code}: {resp.text[:100]}")
+                return None
+
+            data = resp.json()
+
+            if not data:
+                logger.debug(f"[CoinGecko] 无数据返回")
+                return None
+
+            # 转换为 DataFrame
+            # CoinGecko OHLC 格式: [timestamp, open, high, low, close]
+            df = pd.DataFrame(
+                data, columns=["timestamp", "open", "high", "low", "close"]
+            )
+            df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df = df.drop(columns=["timestamp"])
+
+            # 过滤日期范围
+            df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+
+            if df.empty:
+                return None
+
+            logger.info(f"[CoinGecko] 获取成功: {stock_code} {len(df)} 条记录")
+            return df
+
+        except Exception as e:
+            logger.debug(f"[CoinGecko] 获取失败: {e}")
+            return None
+
+    def _fetch_coingecko_extended(
+        self, coin_id: str, start_date: str, end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        分段获取超过 90 天的数据
+        """
+        all_dfs = []
+        current_start = datetime.strptime(start_date, "%Y-%m-%d")
+        final_end = datetime.strptime(end_date, "%Y-%m-%d")
+
+        while current_start < final_end:
+            current_end = min(current_start + timedelta(days=90), final_end)
+
+            self._rate_limit_coingecko()
+
+            days = (current_end - current_start).days + 1
+            url = f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/ohlc"
+            params = {"vs_currency": "usd", "days": str(min(days, 90))}
+
+            if self.coingecko_api_key:
+                params["x_cg_demo_api_key"] = self.coingecko_api_key
+
+            try:
+                resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        df = pd.DataFrame(
+                            data, columns=["timestamp", "open", "high", "low", "close"]
+                        )
+                        df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+                        df = df.drop(columns=["timestamp"])
+                        all_dfs.append(df)
+            except Exception as e:
+                logger.debug(f"[CoinGecko] 分段获取失败: {e}")
+
+            current_start = current_end + timedelta(days=1)
+
+        if not all_dfs:
+            return None
+
+        result = pd.concat(all_dfs, ignore_index=True)
+        result = result.drop_duplicates(subset=["date"])
+        result = result.sort_values("date")
+
+        return result
+
+    def _get_realtime_quote_via_coingecko(
+        self, stock_code: str
+    ) -> Optional[UnifiedRealtimeQuote]:
+        """通过 CoinGecko 获取实时行情（免费）"""
+        try:
+            coin_id = self._get_coingecko_id(stock_code)
+            if not coin_id:
+                return None
+
+            self._rate_limit_coingecko()
+
+            url = f"{self.COINGECKO_BASE_URL}/simple/price"
+            params = {
+                "ids": coin_id,
+                "vs_currencies": "usd",
+                "include_24hr_change": "true",
+                "include_24hr_vol": "true",
+                "include_market_cap": "true",
+            }
+
+            if self.coingecko_api_key:
+                params["x_cg_demo_api_key"] = self.coingecko_api_key
+
+            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            if coin_id not in data:
+                return None
+
+            coin_data = data[coin_id]
+            base_symbol = self._extract_base_symbol(stock_code)
+
+            return UnifiedRealtimeQuote(
+                code=stock_code.upper(),
+                name=CRYPTO_NAMES.get(base_symbol, base_symbol),
+                source=RealtimeSource.CRYPTO,
+                price=self._safe_float(coin_data.get("usd")),
+                change_pct=self._safe_float(coin_data.get("usd_24h_change")),
+                volume=self._safe_int(coin_data.get("usd_24h_vol")),
+                total_mv=self._safe_float(coin_data.get("usd_market_cap")),
+            )
+
+        except Exception as e:
+            logger.debug(f"[CoinGecko] 实时行情失败: {e}")
+            return None
+
+    def _get_coingecko_id(self, stock_code: str) -> Optional[str]:
+        """获取 CoinGecko ID"""
+        symbol = stock_code.strip().upper()
+        # 移除常见后缀
+        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
+            if symbol.endswith(suffix):
+                symbol = symbol[: -len(suffix)]
+                break
+        return COINGECKO_ID_MAP.get(symbol)
+
+    def _rate_limit_coingecko(self):
+        """CoinGecko 速率限制"""
+        elapsed = time.time() - self._last_coingecko_request
+        if elapsed < self.COINGECKO_MIN_INTERVAL:
+            time.sleep(self.COINGECKO_MIN_INTERVAL - elapsed)
+        self._last_coingecko_request = time.time()
+
+    # ==================== Binance API (第二选择，免费) ====================
+
+    def _fetch_via_binance(
+        self, stock_code: str, start_date: str, end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        通过 Binance 公开 API 获取数据（免费，无需密钥）
+
+        Args:
+            stock_code: 加密货币代码
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame 或 None
+        """
+        try:
+            symbol = self._to_binance_symbol(stock_code)
+
+            start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+            end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+
+            all_klines = []
+            current_ts = start_ts
+
+            while current_ts < end_ts:
+                url = f"{self.BINANCE_BASE_URL}/klines"
+                params = {
+                    "symbol": symbol,
+                    "interval": "1d",
+                    "startTime": current_ts,
+                    "endTime": end_ts,
+                    "limit": 500,  # Binance 单次最大 1000
+                }
+
+                resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+
+                if resp.status_code == 429:
+                    logger.warning("[Binance] 速率限制，等待...")
+                    time.sleep(2)
+                    continue
+
+                if resp.status_code != 200:
+                    logger.debug(
+                        f"[Binance] HTTP {resp.status_code}: {resp.text[:100]}"
+                    )
+                    break
+
+                klines = resp.json()
+                if not klines:
+                    break
+
+                all_klines.extend(klines)
+                last_ts = klines[-1][0]
+                if last_ts <= current_ts:
+                    break
+                current_ts = last_ts + 86400000  # +1 day in ms
+                time.sleep(0.1)  # 避免速率限制
+
+            if not all_klines:
+                logger.debug(f"[Binance] 无数据返回: {symbol}")
+                return None
+
+            # Binance kline 格式: [open_time, open, high, low, close, volume, ...]
+            df = pd.DataFrame(
+                all_klines,
+                columns=[
+                    "timestamp",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "close_time",
+                    "quote_volume",
+                    "trades",
+                    "taker_buy_base",
+                    "taker_buy_quote",
+                    "ignore",
+                ],
+            )
+
+            df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df = df[["date", "open", "high", "low", "close", "volume"]]
+            df[["open", "high", "low", "close", "volume"]] = df[
+                ["open", "high", "low", "close", "volume"]
+            ].astype(float)
+
+            # 过滤日期范围
+            df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+
+            if df.empty:
+                return None
+
+            logger.info(f"[Binance] 获取成功: {stock_code} {len(df)} 条记录")
+            return df
+
+        except Exception as e:
+            logger.debug(f"[Binance] 获取失败: {e}")
+            return None
+
+    def _get_realtime_quote_via_binance(
+        self, stock_code: str
+    ) -> Optional[UnifiedRealtimeQuote]:
+        """通过 Binance 获取实时行情"""
+        try:
+            symbol = self._to_binance_symbol(stock_code)
+            base_symbol = self._extract_base_symbol(stock_code)
+
+            # 获取 ticker
+            url = f"{self.BINANCE_BASE_URL}/ticker/24hr"
+            params = {"symbol": symbol}
+            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+
+            return UnifiedRealtimeQuote(
+                code=stock_code.upper(),
+                name=CRYPTO_NAMES.get(base_symbol, base_symbol),
+                source=RealtimeSource.CRYPTO,
+                price=self._safe_float(data.get("lastPrice")),
+                change_pct=self._safe_float(data.get("priceChangePercent")),
+                change_amount=self._safe_float(data.get("priceChange")),
+                volume=self._safe_int(data.get("volume")),
+                amount=self._safe_float(data.get("quoteVolume")),
+                open_price=self._safe_float(data.get("openPrice")),
+                high=self._safe_float(data.get("highPrice")),
+                low=self._safe_float(data.get("lowPrice")),
+                pre_close=self._safe_float(data.get("prevClosePrice")),
+            )
+
+        except Exception as e:
+            logger.debug(f"[Binance] 实时行情失败: {e}")
+            return None
+
+    def _to_binance_symbol(self, stock_code: str) -> str:
+        """转换为 Binance symbol 格式 (如 BTCUSDT)"""
+        code = stock_code.strip().upper()
+        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
+            if code.endswith(suffix):
+                code = code[: -len(suffix)]
+                break
+        code = code.replace("-", "")
+        return f"{code}USDT"
+
+    # ==================== QVeris API (最后备选) ====================
 
     def _get_headers(self) -> Dict[str, str]:
         """获取 QVeris API 请求头"""
@@ -130,7 +517,7 @@ class CryptoFetcher(BaseFetcher):
         import httpx
 
         try:
-            with httpx.Client(timeout=self.QVERIS_TIMEOUT) as client:
+            with httpx.Client(timeout=30) as client:
                 response = client.post(
                     f"{self.QVERIS_BASE_URL}/search",
                     headers=self._get_headers(),
@@ -149,7 +536,7 @@ class CryptoFetcher(BaseFetcher):
         import httpx
 
         try:
-            with httpx.Client(timeout=self.QVERIS_TIMEOUT) as client:
+            with httpx.Client(timeout=30) as client:
                 response = client.post(
                     f"{self.QVERIS_BASE_URL}/tools/execute",
                     params={"tool_id": tool_id},
@@ -166,54 +553,16 @@ class CryptoFetcher(BaseFetcher):
             logger.debug(f"[CryptoFetcher] QVeris 执行失败: {e}")
             return {"success": False, "error_message": str(e)}
 
-    def _get_exchange(self) -> Any:
-        """获取交易所实例（CCXT 备用）"""
-        if self._exchange is None:
-            ccxt = self._get_ccxt()
-            exchange_class = getattr(ccxt, self.exchange_name, None)
-            if exchange_class is None:
-                raise DataFetchError(f"不支持的交易所: {self.exchange_name}")
-            self._exchange = exchange_class(
-                {
-                    "enableRateLimit": True,
-                    "timeout": 30000,
-                }
-            )
-        return self._exchange
-
-    def _to_ccxt_symbol(self, stock_code: str) -> str:
-        """转换加密货币代码为 CCXT 格式"""
-        code = stock_code.strip().upper()
-        if "/" in code:
-            return code
-        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
-            if code.endswith(suffix):
-                code = code[: -len(suffix)]
-                break
-        code = code.replace("-", "")
-        return f"{code}/USDT"
-
-    def _extract_base_symbol(self, stock_code: str) -> str:
-        """提取基础符号"""
-        ccxt_symbol = self._to_ccxt_symbol(stock_code)
-        return ccxt_symbol.split("/")[0]
-
     def _fetch_via_qveris(
         self, stock_code: str, start_date: str, end_date: str
     ) -> Optional[pd.DataFrame]:
-        """
-        通过 QVeris 获取数据（首选）
-
-        Returns:
-            DataFrame 或 None（失败时）
-        """
+        """通过 QVeris 获取数据（最后备选）"""
         if not self._qveris_available:
             return None
 
         try:
             logger.debug(f"[CryptoFetcher] 通过 QVeris 获取 {stock_code} 数据")
 
-            # 搜索加密货币历史数据工具
             search_result = self._search_qveris_tool(
                 "cryptocurrency historical price OHLC candlestick bitcoin ethereum",
                 limit=5,
@@ -261,140 +610,13 @@ class CryptoFetcher(BaseFetcher):
             logger.debug(f"[CryptoFetcher] QVeris 获取失败: {e}")
             return None
 
-    def _fetch_via_ccxt(
-        self, stock_code: str, start_date: str, end_date: str
-    ) -> pd.DataFrame:
-        """
-        通过 CCXT 获取数据（备用）
-        """
-        exchange = self._get_exchange()
-        symbol = self._to_ccxt_symbol(stock_code)
-
-        logger.debug(f"[CryptoFetcher] 通过 CCXT 获取 {symbol} 数据")
-
-        try:
-            start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
-            end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
-
-            all_ohlcv = []
-            current_ts = start_ts
-
-            while current_ts < end_ts:
-                ohlcv = exchange.fetch_ohlcv(
-                    symbol, timeframe="1d", since=current_ts, limit=1000
-                )
-
-                if not ohlcv:
-                    break
-
-                all_ohlcv.extend(ohlcv)
-                last_ts = ohlcv[-1][0]
-                if last_ts <= current_ts:
-                    break
-                current_ts = last_ts + 86400000
-                time.sleep(0.1)
-
-            if not all_ohlcv:
-                raise DataFetchError(f"未获取到 {symbol} 的数据")
-
-            df = pd.DataFrame(
-                all_ohlcv,
-                columns=["timestamp", "open", "high", "low", "close", "volume"],
-            )
-
-            df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
-
-            logger.info(f"[CryptoFetcher] CCXT 获取成功: {len(df)} 条记录")
-            return df
-
-        except Exception as e:
-            if isinstance(e, DataFetchError):
-                raise
-            raise DataFetchError(f"获取加密货币数据失败: {e}") from e
-
-    def _fetch_raw_data(
-        self, stock_code: str, start_date: str, end_date: str
-    ) -> pd.DataFrame:
-        """
-        获取原始数据（首选 QVeris，备用 CCXT）
-        """
-        # 1. 首选：QVeris
-        if self._qveris_available:
-            df = self._fetch_via_qveris(stock_code, start_date, end_date)
-            if df is not None and not df.empty:
-                return df
-            logger.info("[CryptoFetcher] QVeris 获取失败，回退到 CCXT")
-
-        # 2. 备用：CCXT
-        return self._fetch_via_ccxt(stock_code, start_date, end_date)
-
-    def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
-        """标准化数据格式"""
-        df = df.copy()
-
-        # 处理可能的列名
-        column_mapping = {
-            "Date": "date",
-            "Time": "date",
-            "timestamp": "date",
-            "datetime": "date",
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-            "Vol": "volume",
-            "Amount": "amount",
-            "Turnover": "amount",
-        }
-        df = df.rename(columns=column_mapping)
-
-        # 确保日期格式
-        if "date" in df.columns:
-            if not pd.api.types.is_string_dtype(df["date"]):
-                df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-
-        # 计算涨跌幅
-        if "close" in df.columns:
-            df["pct_chg"] = df["close"].pct_change() * 100
-            df["pct_chg"] = df["pct_chg"].fillna(0).round(2)
-
-        # 计算成交额
-        if (
-            "amount" not in df.columns
-            and "close" in df.columns
-            and "volume" in df.columns
-        ):
-            df["amount"] = df["close"] * df["volume"]
-
-        df["code"] = stock_code
-
-        keep_cols = ["code"] + STANDARD_COLUMNS
-        existing_cols = [col for col in keep_cols if col in df.columns]
-        df = df[existing_cols]
-
-        return df
-
-    def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
-        """获取实时行情（首选 QVeris，备用 CCXT）"""
-        if not _is_crypto_code(stock_code):
-            return None
-
-        # 首选 QVeris
-        if self._qveris_available:
-            quote = self._get_realtime_quote_via_qveris(stock_code)
-            if quote:
-                return quote
-            logger.debug("[CryptoFetcher] QVeris 实时行情失败，回退到 CCXT")
-
-        # 备用 CCXT
-        return self._get_realtime_quote_via_ccxt(stock_code)
-
     def _get_realtime_quote_via_qveris(
         self, stock_code: str
     ) -> Optional[UnifiedRealtimeQuote]:
         """通过 QVeris 获取实时行情"""
+        if not self._qveris_available:
+            return None
+
         try:
             search_result = self._search_qveris_tool(
                 "cryptocurrency real-time price quote bitcoin ethereum", limit=5
@@ -449,6 +671,79 @@ class CryptoFetcher(BaseFetcher):
             logger.debug(f"[CryptoFetcher] QVeris 实时行情失败: {e}")
             return None
 
+    # ==================== CCXT (第三选择) ====================
+
+    def _get_ccxt(self):
+        """导入并返回 ccxt 模块"""
+        import ccxt
+
+        return ccxt
+
+    def _get_exchange(self) -> Any:
+        """获取交易所实例（CCXT）"""
+        if self._exchange is None:
+            ccxt = self._get_ccxt()
+            exchange_class = getattr(ccxt, self.exchange_name, None)
+            if exchange_class is None:
+                raise DataFetchError(f"不支持的交易所: {self.exchange_name}")
+            self._exchange = exchange_class(
+                {
+                    "enableRateLimit": True,
+                    "timeout": 30000,
+                }
+            )
+        return self._exchange
+
+    def _fetch_via_ccxt(
+        self, stock_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """通过 CCXT 获取数据"""
+        exchange = self._get_exchange()
+        symbol = self._to_ccxt_symbol(stock_code)
+
+        logger.debug(f"[CryptoFetcher] 通过 CCXT 获取 {symbol} 数据")
+
+        try:
+            start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+            end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+
+            all_ohlcv = []
+            current_ts = start_ts
+
+            while current_ts < end_ts:
+                ohlcv = exchange.fetch_ohlcv(
+                    symbol, timeframe="1d", since=current_ts, limit=1000
+                )
+
+                if not ohlcv:
+                    break
+
+                all_ohlcv.extend(ohlcv)
+                last_ts = ohlcv[-1][0]
+                if last_ts <= current_ts:
+                    break
+                current_ts = last_ts + 86400000
+                time.sleep(0.1)
+
+            if not all_ohlcv:
+                raise DataFetchError(f"未获取到 {symbol} 的数据")
+
+            df = pd.DataFrame(
+                all_ohlcv,
+                columns=["timestamp", "open", "high", "low", "close", "volume"],
+            )
+
+            df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+
+            logger.info(f"[CryptoFetcher] CCXT 获取成功: {len(df)} 条记录")
+            return df
+
+        except Exception as e:
+            if isinstance(e, DataFetchError):
+                raise
+            raise DataFetchError(f"获取加密货币数据失败: {e}") from e
+
     def _get_realtime_quote_via_ccxt(
         self, stock_code: str
     ) -> Optional[UnifiedRealtimeQuote]:
@@ -492,8 +787,153 @@ class CryptoFetcher(BaseFetcher):
             )
 
         except Exception as e:
-            logger.warning(f"[CryptoFetcher] CCXT 获取 {stock_code} 实时行情失败: {e}")
+            logger.debug(f"[CryptoFetcher] CCXT 实时行情失败: {e}")
             return None
+
+    def _to_ccxt_symbol(self, stock_code: str) -> str:
+        """转换加密货币代码为 CCXT 格式"""
+        code = stock_code.strip().upper()
+        if "/" in code:
+            return code
+        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
+            if code.endswith(suffix):
+                code = code[: -len(suffix)]
+                break
+        code = code.replace("-", "")
+        return f"{code}/USDT"
+
+    def _extract_base_symbol(self, stock_code: str) -> str:
+        """提取基础符号"""
+        code = stock_code.strip().upper()
+        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
+            if code.endswith(suffix):
+                code = code[: -len(suffix)]
+                break
+        return code.replace("-", "")
+
+    # ==================== 主入口方法 ====================
+
+    def _fetch_raw_data(
+        self, stock_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """
+        获取原始数据
+
+        优先级: CoinGecko -> Binance -> CCXT -> QVeris
+        """
+        errors = []
+
+        # 1. CoinGecko (首选，免费)
+        df = self._fetch_via_coingecko(stock_code, start_date, end_date)
+        if df is not None and not df.empty:
+            return df
+        errors.append("CoinGecko")
+
+        # 2. Binance (第二选择，免费)
+        df = self._fetch_via_binance(stock_code, start_date, end_date)
+        if df is not None and not df.empty:
+            return df
+        errors.append("Binance")
+
+        # 3. CCXT (第三选择)
+        try:
+            df = self._fetch_via_ccxt(stock_code, start_date, end_date)
+            if df is not None and not df.empty:
+                return df
+        except Exception as e:
+            logger.debug(f"[CryptoFetcher] CCXT 失败: {e}")
+        errors.append("CCXT")
+
+        # 4. QVeris (最后备选)
+        if self._qveris_available:
+            df = self._fetch_via_qveris(stock_code, start_date, end_date)
+            if df is not None and not df.empty:
+                return df
+        errors.append("QVeris")
+
+        raise DataFetchError(f"所有数据源均失败 ({', '.join(errors)}): {stock_code}")
+
+    def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+        """
+        获取实时行情
+
+        优先级: CoinGecko -> Binance -> CCXT -> QVeris
+        """
+        if not _is_crypto_code(stock_code):
+            return None
+
+        # 1. CoinGecko (首选)
+        quote = self._get_realtime_quote_via_coingecko(stock_code)
+        if quote:
+            return quote
+
+        # 2. Binance
+        quote = self._get_realtime_quote_via_binance(stock_code)
+        if quote:
+            return quote
+
+        # 3. CCXT
+        try:
+            quote = self._get_realtime_quote_via_ccxt(stock_code)
+            if quote:
+                return quote
+        except Exception:
+            pass
+
+        # 4. QVeris
+        if self._qveris_available:
+            quote = self._get_realtime_quote_via_qveris(stock_code)
+            if quote:
+                return quote
+
+        return None
+
+    def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        """标准化数据格式"""
+        df = df.copy()
+
+        # 处理可能的列名
+        column_mapping = {
+            "Date": "date",
+            "Time": "date",
+            "timestamp": "date",
+            "datetime": "date",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume",
+            "Vol": "volume",
+            "Amount": "amount",
+            "Turnover": "amount",
+        }
+        df = df.rename(columns=column_mapping)
+
+        # 确保日期格式
+        if "date" in df.columns:
+            if not pd.api.types.is_string_dtype(df["date"]):
+                df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+
+        # 计算涨跌幅
+        if "close" in df.columns:
+            df["pct_chg"] = df["close"].pct_change() * 100
+            df["pct_chg"] = df["pct_chg"].fillna(0).round(2)
+
+        # 计算成交额
+        if (
+            "amount" not in df.columns
+            and "close" in df.columns
+            and "volume" in df.columns
+        ):
+            df["amount"] = df["close"] * df["volume"]
+
+        df["code"] = stock_code
+
+        keep_cols = ["code"] + STANDARD_COLUMNS
+        existing_cols = [col for col in keep_cols if col in df.columns]
+        df = df[existing_cols]
+
+        return df
 
     def _safe_float(self, val: Any) -> Optional[float]:
         try:
@@ -530,8 +970,19 @@ if __name__ == "__main__":
 
     fetcher = CryptoFetcher()
 
-    print("\n=== BTC 实时行情 ===")
+    print("\n=== BTC Realtime Quote ===")
     quote = fetcher.get_realtime_quote("BTC")
     if quote:
-        print(f"价格: ${quote.price:,.2f}")
-        print(f"来源: {quote.source.value}")
+        print(f"Price: ${quote.price:,.2f}")
+        print(f"Source: {quote.source.value}")
+
+    print("\n=== BTC Historical Data (7 days) ===")
+    from datetime import datetime, timedelta
+
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    df = fetcher.fetch_daily_data("BTC", start_date=start_date, end_date=end_date)
+    if df is not None and not df.empty:
+        print(f"Got {len(df)} records")
+        print(df.tail())
