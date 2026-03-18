@@ -550,8 +550,9 @@ class StockAnalysisPipeline:
             # Step 2: 获取历史数据
             daily_df = None
             try:
+                # 加密货币使用 30 天窗口（days=15, actual=15*2=30天）
                 daily_df, source_name = self.fetcher_manager.get_daily_data(
-                    code, days=60
+                    code, days=15
                 )
                 if daily_df is not None and not daily_df.empty:
                     logger.info(

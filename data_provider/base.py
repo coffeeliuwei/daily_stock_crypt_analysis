@@ -926,6 +926,7 @@ class DataFetcherManager:
         # 快速路径1：加密货币直接路由到 QVerisFetcher（主数据源）
         # 注意：必须先检查加密货币，因为 BTC/ETH 等符号会匹配美股正则 ^[A-Z]{1,5}$
         if _is_crypto_code(stock_code):
+            # 优先尝试 QVerisFetcher
             for attempt, fetcher in enumerate(self._fetchers, start=1):
                 if fetcher.name == "QVerisFetcher":
                     try:
@@ -955,7 +956,39 @@ class DataFetcherManager:
                         )
                         errors.append(error_msg)
                     break
-            # QVerisFetcher failed for crypto
+
+            # QVerisFetcher 失败，fallback 到 CryptoFetcher（有 CCXT 备用）
+            for attempt, fetcher in enumerate(self._fetchers, start=1):
+                if fetcher.name == "CryptoFetcher":
+                    try:
+                        logger.info(
+                            f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] "
+                            f"加密货币 {stock_code} fallback（QVeris 失败后尝试 CCXT）..."
+                        )
+                        df = fetcher.get_daily_data(
+                            stock_code=stock_code,
+                            start_date=start_date,
+                            end_date=end_date,
+                            days=days,
+                        )
+                        if df is not None and not df.empty:
+                            elapsed = time.time() - request_start
+                            logger.info(
+                                f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                                f"rows={len(df)}, elapsed={elapsed:.2f}s"
+                            )
+                            return df, fetcher.name
+                    except Exception as e:
+                        error_type, error_reason = summarize_exception(e)
+                        error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
+                        logger.warning(
+                            f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
+                            f"error_type={error_type}, reason={error_reason}"
+                        )
+                        errors.append(error_msg)
+                    break
+
+            # 所有加密货币数据源都失败
             error_summary = f"加密货币 {stock_code} 获取失败:\n" + "\n".join(errors)
             elapsed = time.time() - request_start
             logger.error(
