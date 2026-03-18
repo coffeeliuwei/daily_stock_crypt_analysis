@@ -191,14 +191,25 @@ class CryptoFetcher(BaseFetcher):
             end_dt = datetime.strptime(end_date, "%Y-%m-%d")
             days = (end_dt - start_dt).days + 1
 
-            # CoinGecko OHLC 接口限制最大 90 天
+            # CoinGecko OHLC API 只接受特定 days 值: 1, 7, 14, 30, 90, 180, 365
+            # 需要将请求的 days 向上取整到最近的有效值
+            VALID_COINGECKO_DAYS = [1, 7, 14, 30, 90, 180, 365]
+            api_days = days
+            for valid_days in VALID_COINGECKO_DAYS:
+                if valid_days >= days:
+                    api_days = valid_days
+                    break
+            else:
+                api_days = 365  # 默认最大值
+
+            # CoinGecko OHLC 接口限制最大 90 天（免费版）
             if days > 90:
                 logger.debug(f"[CoinGecko] 请求天数 {days} 超过 90 天限制，分段获取")
                 return self._fetch_coingecko_extended(coin_id, start_date, end_date)
 
             # 调用 OHLC 接口
             url = f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/ohlc"
-            params = {"vs_currency": "usd", "days": str(days)}
+            params = {"vs_currency": "usd", "days": str(api_days)}
 
             if self.coingecko_api_key:
                 params["x_cg_demo_api_key"] = self.coingecko_api_key
@@ -223,11 +234,13 @@ class CryptoFetcher(BaseFetcher):
 
             # 转换为 DataFrame
             # CoinGecko OHLC 格式: [timestamp, open, high, low, close]
+            # 注意：CoinGecko OHLC 不返回 volume 数据
             df = pd.DataFrame(
                 data, columns=["timestamp", "open", "high", "low", "close"]
             )
             df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
             df = df.drop(columns=["timestamp"])
+            df["volume"] = 0  # CoinGecko OHLC 不提供 volume，设为 0
 
             # 过滤日期范围
             df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
@@ -257,9 +270,9 @@ class CryptoFetcher(BaseFetcher):
 
             self._rate_limit_coingecko()
 
-            days = (current_end - current_start).days + 1
+            # CoinGecko OHLC API 只接受特定 days 值，分段请求统一使用 90
             url = f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/ohlc"
-            params = {"vs_currency": "usd", "days": str(min(days, 90))}
+            params = {"vs_currency": "usd", "days": "90"}
 
             if self.coingecko_api_key:
                 params["x_cg_demo_api_key"] = self.coingecko_api_key
@@ -274,6 +287,7 @@ class CryptoFetcher(BaseFetcher):
                         )
                         df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
                         df = df.drop(columns=["timestamp"])
+                        df["volume"] = 0  # CoinGecko OHLC 不提供 volume
                         all_dfs.append(df)
             except Exception as e:
                 logger.debug(f"[CoinGecko] 分段获取失败: {e}")
