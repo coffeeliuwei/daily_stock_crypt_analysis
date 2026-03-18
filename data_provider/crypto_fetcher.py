@@ -166,18 +166,7 @@ class CryptoFetcher(BaseFetcher):
             logger.debug(f"[CryptoFetcher] QVeris 执行失败: {e}")
             return {"success": False, "error_message": str(e)}
 
-    def _get_ccxt(self):
-        """延迟加载 CCXT 库"""
-        if self._ccxt is None:
-            try:
-                import ccxt
-
-                self._ccxt = ccxt
-            except ImportError:
-                raise DataFetchError("CCXT 库未安装，请运行: pip install ccxt")
-        return self._ccxt
-
-    def _get_exchange(self):
+    def _get_exchange(self) -> Any:
         """获取交易所实例（CCXT 备用）"""
         if self._exchange is None:
             ccxt = self._get_ccxt()

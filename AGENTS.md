@@ -72,7 +72,7 @@ python main.py --market-review
 python main.py --schedule
 python main.py --serve
 python main.py --serve-only
-uvicorn server:app --reload --host 0.0.0.0 --port 8000
+uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 后端验证

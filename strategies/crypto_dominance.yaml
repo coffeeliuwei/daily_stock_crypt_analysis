@@ -1,0 +1,63 @@
+# Crypto Market Cap Dominance Strategy / 市值占比策略
+# Monitor BTC dominance and altcoin season signals.
+
+name: crypto_dominance
+display_name: 市值占比策略
+description: 基于比特币市值占比判断市场周期，识别山寨币季节与比特币季节。
+category: framework
+core_rules: [2, 5]
+market: crypto
+required_tools:
+  - get_daily_history
+  - analyze_trend
+
+instructions: |
+  **市值占比策略（Crypto Market Cap Dominance Strategy）**
+  
+  核心逻辑：比特币市值占比变化反映资金流向，指导资产配置。
+  - BTC 占比上升 → 资金回流比特币，山寨币承压
+  - BTC 占比下降 → 资金流向山寨币，山寨币季节
+
+  ## 占比阈值判断
+
+  | BTC 占比 | 市场状态 | 操作建议 |
+  |----------|----------|----------|
+  | > 55% | 比特币季节 | 侧重 BTC，减少山寨币敞口 |
+  | 45-55% | 过渡期 | 均衡配置，观望为主 |
+  | < 45% | 山寨币季节 | 增加山寨币仓位，精选标的 |
+  | < 35% | 极端山寨币季节 | 高风险高收益，注意回调 |
+
+  ## 分析步骤
+
+  ### 1. 获取市值占比数据
+  通过 QVeris API / CoinGecko 获取：
+  - 当前 BTC 市值占比
+  - ETH 市值占比
+  - 近 30 天占比变化趋势
+
+  ### 2. 占比趋势分析
+  - **BTC 占比上升 + 价格上涨**：BTC 领涨，避险情绪
+  - **BTC 占比下降 + 价格上涨**：资金扩散，山寨币活跃
+  - **BTC 占比上升 + 价格下跌**：避险抛售，市场恐慌
+  - **BTC 占比下降 + 价格下跌**：资金撤离，全面下跌
+
+  ### 3. 山寨币季节判断
+  - 近 90 天内，前 50 山寨币中 75% 跑赢 BTC = 山寨币季节
+  - 比例低于 50% = BTC 季节
+
+  ### 4. 资产配置建议
+  根据 BTC 占比和趋势调整配置：
+  - BTC 季节：BTC 60-70%，ETH 20%，其他山寨币 10-20%
+  - 山寨币季节：BTC 30-40%，ETH 25%，精选山寨币 35-45%
+
+  ### 5. 输出要求
+  - 当前 BTC/ETH 占比及近 30 天变化
+  - 市场季节判断（比特币季节/过渡期/山寨币季节）
+  - 资产配置建议
+  - 占比变化的驱动因素分析
+
+  评分调整建议：
+  - 分析对象为 BTC + 处于 BTC 季节：`sentiment_score +5`
+  - 分析对象为山寨币 + 处于山寨币季节：`sentiment_score +8`
+  - 分析对象为山寨币 + 处于 BTC 季节：`sentiment_score -5`
+  - 占比趋势有利：额外 `+3`

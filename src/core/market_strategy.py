@@ -44,11 +44,18 @@ class MarketStrategyBlueprint:
             f"### Action Framework\n{action_text}"
         )
 
-    def to_markdown_block(self) -> str:
-        """Render blueprint as markdown section for template fallback report."""
-        dims = "\n".join([f"- **{dim.name}**: {dim.objective}" for dim in self.dimensions])
-        section_title = "### 六、策略框架" if self.region == "cn" else "### VI. Strategy Framework"
-        return f"{section_title}\n{dims}\n"
+
+def to_markdown_block(self) -> str:
+    """Render blueprint as markdown section for template fallback report."""
+    dims = "\n".join([f"- **{dim.name}**: {dim.objective}" for dim in self.dimensions])
+    # 根据区域选择标题
+    if self.region == "cn":
+        section_title = "### 六、策略框架"
+    elif self.region == "crypto":
+        section_title = "### 六、策略框架"
+    else:
+        section_title = "### VI. Strategy Framework"
+    return f"{section_title}\n{dims}\n"
 
 
 CN_BLUEPRINT = MarketStrategyBlueprint(
@@ -64,17 +71,29 @@ CN_BLUEPRINT = MarketStrategyBlueprint(
         StrategyDimension(
             name="趋势结构",
             objective="判断市场处于上升、震荡还是防守阶段。",
-            checkpoints=["上证/深证/创业板是否同向", "放量上涨或缩量下跌是否成立", "关键支撑阻力是否被突破"],
+            checkpoints=[
+                "上证/深证/创业板是否同向",
+                "放量上涨或缩量下跌是否成立",
+                "关键支撑阻力是否被突破",
+            ],
         ),
         StrategyDimension(
             name="资金情绪",
             objective="识别短线风险偏好与情绪温度。",
-            checkpoints=["涨跌家数与涨跌停结构", "成交额是否扩张", "高位股是否出现分歧"],
+            checkpoints=[
+                "涨跌家数与涨跌停结构",
+                "成交额是否扩张",
+                "高位股是否出现分歧",
+            ],
         ),
         StrategyDimension(
             name="主线板块",
             objective="提炼可交易主线与规避方向。",
-            checkpoints=["领涨板块是否具备事件催化", "板块内部是否有龙头带动", "领跌板块是否扩散"],
+            checkpoints=[
+                "领涨板块是否具备事件催化",
+                "板块内部是否有龙头带动",
+                "领跌板块是否扩散",
+            ],
         ),
     ],
     action_framework=[
@@ -130,6 +149,68 @@ US_BLUEPRINT = MarketStrategyBlueprint(
 )
 
 
+CRYPTO_BLUEPRINT = MarketStrategyBlueprint(
+    region="crypto",
+    title="加密货币市场策略框架",
+    positioning="聚焦趋势结构、情绪周期与市值占比，形成风险调整后的交易决策。加密货币市场 24/7 交易，波动性远高于传统市场。",
+    principles=[
+        "先看 BTC/ETH 趋势方向，再看恐惧贪婪指数，最后看市值占比变化。",
+        "加密货币波动性高，仓位管理优先于方向判断。",
+        "情绪指标（恐惧贪婪指数）是加密货币特有的重要参考。",
+        "24/7 交易意味着关键突破可能发生在任何时间，需设置止损保护。",
+    ],
+    dimensions=[
+        StrategyDimension(
+            name="趋势结构",
+            objective="判断加密货币处于上升、震荡还是下跌趋势。",
+            checkpoints=[
+                "MA7/MA25/MA99 是否形成多头/空头排列",
+                "BTC 与 ETH 趋势是否同向",
+                "关键支撑阻力位是否被突破",
+                "成交量是否确认趋势方向",
+            ],
+        ),
+        StrategyDimension(
+            name="情绪周期",
+            objective="通过恐惧贪婪指数识别市场情绪极端位置。",
+            checkpoints=[
+                "当前恐惧贪婪指数值及近7日变化趋势",
+                "是否处于极度恐惧（买入机会）或极度贪婪（风险信号）",
+                "社交媒体情绪与指数是否背离",
+            ],
+        ),
+        StrategyDimension(
+            name="市值占比",
+            objective="通过 BTC 占比判断资金流向与市场周期。",
+            checkpoints=[
+                "BTC 市值占比及近30日变化趋势",
+                "当前处于比特币季节还是山寨币季节",
+                "资金是否在 BTC 和山寨币之间轮动",
+            ],
+        ),
+        StrategyDimension(
+            name="风险事件",
+            objective="识别可能影响市场的宏观/监管事件。",
+            checkpoints=[
+                "是否有监管政策变化（SEC、各国央行等）",
+                "是否有重大安全事件（交易所被盗、合约漏洞等）",
+                "是否有宏观经济事件（美联储议息、通胀数据等）",
+            ],
+        ),
+    ],
+    action_framework=[
+        "进攻：BTC/ETH 趋势向上 + 恐惧贪婪指数中性偏低 + 资金流入。",
+        "均衡：趋势不明或恐惧贪婪指数极端（等待情绪回归）。",
+        "防守：趋势转弱 + 恐惧贪婪指数极度贪婪 + 监管风险。",
+    ],
+)
+
+
 def get_market_strategy_blueprint(region: str) -> MarketStrategyBlueprint:
     """Return strategy blueprint by market region."""
-    return US_BLUEPRINT if region == "us" else CN_BLUEPRINT
+    if region == "crypto":
+        return CRYPTO_BLUEPRINT
+    elif region == "us":
+        return US_BLUEPRINT
+    else:
+        return CN_BLUEPRINT

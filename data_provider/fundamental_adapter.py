@@ -73,13 +73,17 @@ def _safe_datetime(value: Any) -> Optional[datetime]:
         return None
     try:
         parsed = pd.to_datetime(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError) as e:
+        logger.debug(
+            f"[fundamental_adapter] Failed to parse datetime from {value}: {e}"
+        )
         return None
     if pd.isna(parsed):
         return None
     try:
         return parsed.to_pydatetime()
-    except Exception:
+    except (TypeError, ValueError, OverflowError) as e:
+        logger.debug(f"[fundamental_adapter] Failed to convert to pydatetime: {e}")
         return None
 
 
@@ -120,7 +124,9 @@ def _parse_dividend_plan_to_per_share(plan_text: str) -> Optional[float]:
             if parsed is not None and parsed > 0:
                 return parsed / 10.0
 
-    match_per_share = re.search(r"每\s*股\s*派(?:发)?\s*([0-9]+(?:\.[0-9]+)?)\s*元", text)
+    match_per_share = re.search(
+        r"每\s*股\s*派(?:发)?\s*([0-9]+(?:\.[0-9]+)?)\s*元", text
+    )
     if match_per_share:
         parsed = _safe_float(match_per_share.group(1))
         if parsed is not None and parsed > 0:
@@ -144,7 +150,13 @@ def _extract_cash_dividend_per_share(row: pd.Series) -> Optional[float]:
 def _filter_rows_by_code(df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
-    code_cols = [c for c in df.columns if any(k in str(c) for k in ("代码", "股票代码", "证券代码", "symbol", "ts_code"))]
+    code_cols = [
+        c
+        for c in df.columns
+        if any(
+            k in str(c) for k in ("代码", "股票代码", "证券代码", "symbol", "ts_code")
+        )
+    ]
     if not code_cols:
         return df
 
@@ -182,9 +194,15 @@ def _build_dividend_payload(
     for _, row in work_df.iterrows():
         if not isinstance(row, pd.Series):
             continue
-        ex_dt = _safe_datetime(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["ex_dividend_date"]))
-        record_dt = _safe_datetime(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["record_date"]))
-        announce_dt = _safe_datetime(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["announce_date"]))
+        ex_dt = _safe_datetime(
+            _pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["ex_dividend_date"])
+        )
+        record_dt = _safe_datetime(
+            _pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["record_date"])
+        )
+        announce_dt = _safe_datetime(
+            _pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["announce_date"])
+        )
         event_dt = ex_dt or record_dt or announce_dt
         if event_dt is None:
             continue
@@ -206,7 +224,9 @@ def _build_dividend_payload(
                 "event_date": event_date.isoformat(),
                 "ex_dividend_date": ex_dt.date().isoformat() if ex_dt else None,
                 "record_date": record_dt.date().isoformat() if record_dt else None,
-                "announcement_date": announce_dt.date().isoformat() if announce_dt else None,
+                "announcement_date": announce_dt.date().isoformat()
+                if announce_dt
+                else None,
                 "cash_dividend_per_share": round(per_share, 6),
                 "is_pre_tax": True,
             }
@@ -226,11 +246,18 @@ def _build_dividend_payload(
             ttm_events.append(item)
 
     return {
-        "events": events[:max(1, max_events)],
+        "events": events[: max(1, max_events)],
         "ttm_event_count": len(ttm_events),
         "ttm_cash_dividend_per_share": (
-            round(sum(float(item.get("cash_dividend_per_share") or 0.0) for item in ttm_events), 6)
-            if ttm_events else None
+            round(
+                sum(
+                    float(item.get("cash_dividend_per_share") or 0.0)
+                    for item in ttm_events
+                ),
+                6,
+            )
+            if ttm_events
+            else None
         ),
         "coverage": "cash_dividend_pre_tax",
         "as_of": now_date.isoformat(),
@@ -244,7 +271,13 @@ def _extract_latest_row(df: pd.DataFrame, stock_code: str) -> Optional[pd.Series
     if df is None or df.empty:
         return None
 
-    code_cols = [c for c in df.columns if any(k in str(c) for k in ("代码", "股票代码", "证券代码", "ts_code", "symbol"))]
+    code_cols = [
+        c
+        for c in df.columns
+        if any(
+            k in str(c) for k in ("代码", "股票代码", "证券代码", "ts_code", "symbol")
+        )
+    ]
     target = _normalize_code(stock_code)
     if code_cols:
         for col in code_cols:
@@ -303,24 +336,43 @@ class AkshareFundamentalAdapter:
         }
 
         # Financial indicators
-        fin_df, fin_source, fin_errors = self._call_df_candidates([
-            ("stock_financial_abstract", {"symbol": stock_code}),
-            ("stock_financial_analysis_indicator", {"symbol": stock_code}),
-            ("stock_financial_analysis_indicator", {}),
-        ])
+        fin_df, fin_source, fin_errors = self._call_df_candidates(
+            [
+                ("stock_financial_abstract", {"symbol": stock_code}),
+                ("stock_financial_analysis_indicator", {"symbol": stock_code}),
+                ("stock_financial_analysis_indicator", {}),
+            ]
+        )
         result["errors"].extend(fin_errors)
         if fin_df is not None:
             row = _extract_latest_row(fin_df, stock_code)
             if row is not None:
-                revenue_yoy = _safe_float(_pick_by_keywords(row, ["营业收入同比", "营收同比", "收入同比", "同比增长"]))
-                profit_yoy = _safe_float(_pick_by_keywords(row, ["净利润同比", "净利同比", "归母净利润同比"]))
-                roe = _safe_float(_pick_by_keywords(row, ["净资产收益率", "ROE", "净资产收益"]))
+                revenue_yoy = _safe_float(
+                    _pick_by_keywords(
+                        row, ["营业收入同比", "营收同比", "收入同比", "同比增长"]
+                    )
+                )
+                profit_yoy = _safe_float(
+                    _pick_by_keywords(row, ["净利润同比", "净利同比", "归母净利润同比"])
+                )
+                roe = _safe_float(
+                    _pick_by_keywords(row, ["净资产收益率", "ROE", "净资产收益"])
+                )
                 gross_margin = _safe_float(_pick_by_keywords(row, ["毛利率"]))
-                report_date = _normalize_report_date(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["report_date"]))
-                revenue = _safe_float(_pick_by_keywords(row, ["营业总收入", "营业收入", "营收"]))
-                net_profit_parent = _safe_float(_pick_by_keywords(row, ["归母净利润", "母公司股东净利润", "净利润"]))
+                report_date = _normalize_report_date(
+                    _pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["report_date"])
+                )
+                revenue = _safe_float(
+                    _pick_by_keywords(row, ["营业总收入", "营业收入", "营收"])
+                )
+                net_profit_parent = _safe_float(
+                    _pick_by_keywords(row, ["归母净利润", "母公司股东净利润", "净利润"])
+                )
                 operating_cash_flow = _safe_float(
-                    _pick_by_keywords(row, ["经营活动产生的现金流量净额", "经营现金流", "经营活动现金流"])
+                    _pick_by_keywords(
+                        row,
+                        ["经营活动产生的现金流量净额", "经营现金流", "经营活动现金流"],
+                    )
                 )
                 result["growth"] = {
                     "revenue_yoy": revenue_yoy,
@@ -340,12 +392,14 @@ class AkshareFundamentalAdapter:
                 result["source_chain"].append(f"growth:{fin_source}")
 
         # Earnings forecast
-        forecast_df, forecast_source, forecast_errors = self._call_df_candidates([
-            ("stock_yjyg_em", {"symbol": stock_code}),
-            ("stock_yjyg_em", {}),
-            ("stock_yjbb_em", {"symbol": stock_code}),
-            ("stock_yjbb_em", {}),
-        ])
+        forecast_df, forecast_source, forecast_errors = self._call_df_candidates(
+            [
+                ("stock_yjyg_em", {"symbol": stock_code}),
+                ("stock_yjyg_em", {}),
+                ("stock_yjbb_em", {"symbol": stock_code}),
+                ("stock_yjbb_em", {}),
+            ]
+        )
         result["errors"].extend(forecast_errors)
         if forecast_df is not None:
             row = _extract_latest_row(forecast_df, stock_code)
@@ -356,10 +410,12 @@ class AkshareFundamentalAdapter:
                 result["source_chain"].append(f"earnings_forecast:{forecast_source}")
 
         # Earnings quick report
-        quick_df, quick_source, quick_errors = self._call_df_candidates([
-            ("stock_yjkb_em", {"symbol": stock_code}),
-            ("stock_yjkb_em", {}),
-        ])
+        quick_df, quick_source, quick_errors = self._call_df_candidates(
+            [
+                ("stock_yjkb_em", {"symbol": stock_code}),
+                ("stock_yjkb_em", {}),
+            ]
+        )
         result["errors"].extend(quick_errors)
         if quick_df is not None:
             row = _extract_latest_row(quick_df, stock_code)
@@ -370,46 +426,63 @@ class AkshareFundamentalAdapter:
                 result["source_chain"].append(f"earnings_quick:{quick_source}")
 
         # Dividend details (cash dividend, pre-tax)
-        dividend_df, dividend_source, dividend_errors = self._call_df_candidates([
-            ("stock_fhps_detail_em", {"symbol": stock_code}),
-            ("stock_history_dividend_detail", {"symbol": stock_code, "indicator": "分红", "date": ""}),
-            ("stock_dividend_cninfo", {"symbol": stock_code}),
-        ])
+        dividend_df, dividend_source, dividend_errors = self._call_df_candidates(
+            [
+                ("stock_fhps_detail_em", {"symbol": stock_code}),
+                (
+                    "stock_history_dividend_detail",
+                    {"symbol": stock_code, "indicator": "分红", "date": ""},
+                ),
+                ("stock_dividend_cninfo", {"symbol": stock_code}),
+            ]
+        )
         result["errors"].extend(dividend_errors)
         if dividend_df is not None:
-            dividend_payload = _build_dividend_payload(dividend_df, stock_code, max_events=5)
+            dividend_payload = _build_dividend_payload(
+                dividend_df, stock_code, max_events=5
+            )
             if dividend_payload:
                 result["earnings"]["dividend"] = dividend_payload
                 result["source_chain"].append(f"dividend:{dividend_source}")
 
         # Institution / top shareholders
-        inst_df, inst_source, inst_errors = self._call_df_candidates([
-            ("stock_institute_hold", {}),
-            ("stock_institute_recommend", {}),
-        ])
+        inst_df, inst_source, inst_errors = self._call_df_candidates(
+            [
+                ("stock_institute_hold", {}),
+                ("stock_institute_recommend", {}),
+            ]
+        )
         result["errors"].extend(inst_errors)
         if inst_df is not None:
             row = _extract_latest_row(inst_df, stock_code)
             if row is not None:
-                inst_change = _safe_float(_pick_by_keywords(row, ["增减", "变化", "变动", "持股变化"]))
+                inst_change = _safe_float(
+                    _pick_by_keywords(row, ["增减", "变化", "变动", "持股变化"])
+                )
                 result["institution"]["institution_holding_change"] = inst_change
                 result["source_chain"].append(f"institution:{inst_source}")
 
-        top10_df, top10_source, top10_errors = self._call_df_candidates([
-            ("stock_gdfx_top_10_em", {"symbol": stock_code}),
-            ("stock_gdfx_top_10_em", {}),
-            ("stock_zh_a_gdhs_detail_em", {"symbol": stock_code}),
-            ("stock_zh_a_gdhs_detail_em", {}),
-        ])
+        top10_df, top10_source, top10_errors = self._call_df_candidates(
+            [
+                ("stock_gdfx_top_10_em", {"symbol": stock_code}),
+                ("stock_gdfx_top_10_em", {}),
+                ("stock_zh_a_gdhs_detail_em", {"symbol": stock_code}),
+                ("stock_zh_a_gdhs_detail_em", {}),
+            ]
+        )
         result["errors"].extend(top10_errors)
         if top10_df is not None:
             row = _extract_latest_row(top10_df, stock_code)
             if row is not None:
-                holder_change = _safe_float(_pick_by_keywords(row, ["增减", "变化", "持股变化", "变动"]))
+                holder_change = _safe_float(
+                    _pick_by_keywords(row, ["增减", "变化", "持股变化", "变动"])
+                )
                 result["institution"]["top10_holder_change"] = holder_change
                 result["source_chain"].append(f"top10:{top10_source}")
 
-        has_content = bool(result["growth"] or result["earnings"] or result["institution"])
+        has_content = bool(
+            result["growth"] or result["earnings"] or result["institution"]
+        )
         result["status"] = "partial" if has_content else "not_supported"
         return result
 
@@ -425,18 +498,22 @@ class AkshareFundamentalAdapter:
             "errors": [],
         }
 
-        stock_df, stock_source, stock_errors = self._call_df_candidates([
-            ("stock_individual_fund_flow", {"stock": stock_code}),
-            ("stock_individual_fund_flow", {"symbol": stock_code}),
-            ("stock_individual_fund_flow", {}),
-            ("stock_main_fund_flow", {"symbol": stock_code}),
-            ("stock_main_fund_flow", {}),
-        ])
+        stock_df, stock_source, stock_errors = self._call_df_candidates(
+            [
+                ("stock_individual_fund_flow", {"stock": stock_code}),
+                ("stock_individual_fund_flow", {"symbol": stock_code}),
+                ("stock_individual_fund_flow", {}),
+                ("stock_main_fund_flow", {"symbol": stock_code}),
+                ("stock_main_fund_flow", {}),
+            ]
+        )
         result["errors"].extend(stock_errors)
         if stock_df is not None:
             row = _extract_latest_row(stock_df, stock_code)
             if row is not None:
-                net_inflow = _safe_float(_pick_by_keywords(row, ["主力净流入", "净流入", "净额"]))
+                net_inflow = _safe_float(
+                    _pick_by_keywords(row, ["主力净流入", "净流入", "净额"])
+                )
                 inflow_5d = _safe_float(_pick_by_keywords(row, ["5日", "五日"]))
                 inflow_10d = _safe_float(_pick_by_keywords(row, ["10日", "十日"]))
                 result["stock_flow"] = {
@@ -446,14 +523,30 @@ class AkshareFundamentalAdapter:
                 }
                 result["source_chain"].append(f"capital_stock:{stock_source}")
 
-        sector_df, sector_source, sector_errors = self._call_df_candidates([
-            ("stock_sector_fund_flow_rank", {}),
-            ("stock_sector_fund_flow_summary", {}),
-        ])
+        sector_df, sector_source, sector_errors = self._call_df_candidates(
+            [
+                ("stock_sector_fund_flow_rank", {}),
+                ("stock_sector_fund_flow_summary", {}),
+            ]
+        )
         result["errors"].extend(sector_errors)
         if sector_df is not None:
-            name_col = next((c for c in sector_df.columns if any(k in str(c) for k in ("板块", "行业", "名称", "name"))), None)
-            flow_col = next((c for c in sector_df.columns if any(k in str(c) for k in ("净流入", "主力", "flow", "净额"))), None)
+            name_col = next(
+                (
+                    c
+                    for c in sector_df.columns
+                    if any(k in str(c) for k in ("板块", "行业", "名称", "name"))
+                ),
+                None,
+            )
+            flow_col = next(
+                (
+                    c
+                    for c in sector_df.columns
+                    if any(k in str(c) for k in ("净流入", "主力", "flow", "净额"))
+                ),
+                None,
+            )
             if name_col and flow_col:
                 work_df = sector_df[[name_col, flow_col]].copy()
                 work_df[flow_col] = pd.to_numeric(work_df[flow_col], errors="coerce")
@@ -461,16 +554,34 @@ class AkshareFundamentalAdapter:
                 top_df = work_df.nlargest(top_n, flow_col)
                 bottom_df = work_df.nsmallest(top_n, flow_col)
                 result["sector_rankings"] = {
-                    "top": [{"name": _safe_str(r[name_col]), "net_inflow": float(r[flow_col])} for _, r in top_df.iterrows()],
-                    "bottom": [{"name": _safe_str(r[name_col]), "net_inflow": float(r[flow_col])} for _, r in bottom_df.iterrows()],
+                    "top": [
+                        {
+                            "name": _safe_str(r[name_col]),
+                            "net_inflow": float(r[flow_col]),
+                        }
+                        for _, r in top_df.iterrows()
+                    ],
+                    "bottom": [
+                        {
+                            "name": _safe_str(r[name_col]),
+                            "net_inflow": float(r[flow_col]),
+                        }
+                        for _, r in bottom_df.iterrows()
+                    ],
                 }
                 result["source_chain"].append(f"capital_sector:{sector_source}")
 
-        has_content = bool(result["stock_flow"] or result["sector_rankings"]["top"] or result["sector_rankings"]["bottom"])
+        has_content = bool(
+            result["stock_flow"]
+            or result["sector_rankings"]["top"]
+            or result["sector_rankings"]["bottom"]
+        )
         result["status"] = "partial" if has_content else "not_supported"
         return result
 
-    def get_dragon_tiger_flag(self, stock_code: str, lookback_days: int = 20) -> Dict[str, Any]:
+    def get_dragon_tiger_flag(
+        self, stock_code: str, lookback_days: int = 20
+    ) -> Dict[str, Any]:
         """
         Return dragon-tiger signal in lookback window.
         """
@@ -483,17 +594,23 @@ class AkshareFundamentalAdapter:
             "errors": [],
         }
 
-        df, source, errors = self._call_df_candidates([
-            ("stock_lhb_stock_statistic_em", {}),
-            ("stock_lhb_detail_em", {}),
-            ("stock_lhb_jgmmtj_em", {}),
-        ])
+        df, source, errors = self._call_df_candidates(
+            [
+                ("stock_lhb_stock_statistic_em", {}),
+                ("stock_lhb_detail_em", {}),
+                ("stock_lhb_jgmmtj_em", {}),
+            ]
+        )
         result["errors"].extend(errors)
         if df is None:
             return result
 
         # Try code filter
-        code_cols = [c for c in df.columns if any(k in str(c) for k in ("代码", "股票代码", "证券代码"))]
+        code_cols = [
+            c
+            for c in df.columns
+            if any(k in str(c) for k in ("代码", "股票代码", "证券代码"))
+        ]
         target = _normalize_code(stock_code)
         matched = pd.DataFrame()
         for col in code_cols:
@@ -510,7 +627,14 @@ class AkshareFundamentalAdapter:
             result["status"] = "ok" if code_cols else "partial"
             return result
 
-        date_col = next((c for c in matched.columns if any(k in str(c) for k in ("日期", "上榜", "交易日", "time"))), None)
+        date_col = next(
+            (
+                c
+                for c in matched.columns
+                if any(k in str(c) for k in ("日期", "上榜", "交易日", "time"))
+            ),
+            None,
+        )
         parsed_dates: List[datetime] = []
         if date_col is not None:
             for val in matched[date_col].astype(str).tolist():
@@ -523,9 +647,13 @@ class AkshareFundamentalAdapter:
         recent_dates = [d for d in parsed_dates if start <= d <= now]
 
         result["is_on_list"] = bool(recent_dates)
-        result["recent_count"] = len(recent_dates) if recent_dates else int(len(matched))
-        result["latest_date"] = max(recent_dates).date().isoformat() if recent_dates else (
-            max(parsed_dates).date().isoformat() if parsed_dates else None
+        result["recent_count"] = (
+            len(recent_dates) if recent_dates else int(len(matched))
+        )
+        result["latest_date"] = (
+            max(recent_dates).date().isoformat()
+            if recent_dates
+            else (max(parsed_dates).date().isoformat() if parsed_dates else None)
         )
         result["status"] = "ok"
         result["source_chain"].append(f"dragon_tiger:{source}")

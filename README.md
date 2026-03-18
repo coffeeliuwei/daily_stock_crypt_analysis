@@ -60,7 +60,7 @@
 | 类型 | 支持 |
 |------|------|
 | AI 模型 | [AIHubMix](https://aihubmix.com/?aff=CfMq)、Gemini、OpenAI 兼容、DeepSeek、通义千问、Claude 等（统一通过 [LiteLLM](https://github.com/BerriAI/litellm) 调用，支持多 Key 负载均衡）|
-| 行情数据 | AkShare、Tushare、Pytdx、Baostock、YFinance |
+| 行情数据 | [QVeris](https://qveris.ai)（主数据源，支持股票/加密货币）、AkShare、Tushare、Pytdx、Baostock、YFinance |
 | 新闻搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
 | 社交舆情 | [Stock Sentiment API](https://api.adanos.org/docs)（Reddit / X / Polymarket，仅美股，可选） |
 

@@ -1,0 +1,59 @@
+# Crypto Bull Trend Strategy / 加密货币多头趋势
+# Default crypto analysis strategy with crypto-specific MA periods.
+
+name: crypto_bull_trend
+display_name: 加密货币多头趋势
+description: 加密货币默认分析策略，使用 MA7/MA25/MA99 识别趋势与入场机会。
+category: trend
+core_rules: [1, 2, 3]
+market: crypto
+required_tools:
+  - get_daily_history
+  - analyze_trend
+
+instructions: |
+  **加密货币多头趋势（Crypto Bull Trend Strategy）**
+  
+  与股票策略的关键差异：
+  - 加密货币市场 24/7 交易，波动性更高
+  - 使用 MA7/MA25/MA99 替代 MA5/MA10/MA20
+  - 乖离率阈值放宽至 8%（股票为 5%）
+  - 结合恐惧贪婪指数判断情绪
+
+  分析框架：
+
+  1. **趋势确认（最高优先级）**
+     - 使用 `analyze_trend` 判断 MA7/MA25/MA99 排列。
+     - MA7 >= MA25 >= MA99 且 MA99 斜率向上 = 多头结构。
+     - 若价格显著跌破 MA99，则降低看多权重。
+     - MACD 金叉/死叉作为辅助确认。
+
+  2. **位置与节奏**
+     - 优先"回踩不破"而非"高位追涨"。
+     - 当价格距离 MA7/MA25 过远时，提示等待回踩。
+     - 放量突破有效阻力时可提高胜率评级。
+
+  3. **量价验证**
+     - 使用 `get_daily_history` 检查突破日/反弹日是否放量。
+     - 缩量上涨需谨慎，放量滞涨需警惕分歧。
+     - 加密货币成交量以 USDT 计价。
+
+  4. **恐惧贪婪指数（加密货币特有）**
+     - 极度恐惧（0-25）：潜在买入机会
+     - 恐惧（25-45）：谨慎乐观
+     - 中性（45-55）：观望
+     - 贪婪（55-75）：注意风险
+     - 极度贪婪（75-100）：考虑减仓
+
+  5. **交易建议输出**
+     - 输出明确的"买入/观望/减仓"倾向及触发条件。
+     - 必须给出止损参考（如 MA99 下方或结构低点）。
+     - 若无清晰优势，明确写"暂不出手"。
+
+  评分调整建议：
+  - 多头排列 + 趋势强度良好：`sentiment_score +12`
+  - 回踩关键均线后企稳：`sentiment_score +8`
+  - 放量突破关键阻力：`sentiment_score +10`
+  - 跌破 MA99 或趋势转弱：`sentiment_score -12`
+  - 恐惧贪婪指数极度恐惧 + 技术面支撑：额外 `+5`
+  - 恐惧贪婪指数极度贪婪 + 技术面压力：额外 `-5`
