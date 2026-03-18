@@ -10,7 +10,13 @@
 import logging
 from typing import Optional, Dict, Any
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+# QVeris API 配置
+QVERIS_BASE_URL = "https://qveris.ai/api/v1"
+QVERIS_TIMEOUT = 30  # 秒
 
 
 class CryptoSentimentService:
@@ -69,11 +75,10 @@ class CryptoSentimentService:
             return self._get_fallback_data()
 
         try:
-            from qveris import search_tools, execute_tool
-
+            # 使用 REST API 调用 QVeris
             # 搜索恐惧贪婪指数工具
-            search_result = search_tools(
-                query="crypto fear greed index bitcoin sentiment", limit=5
+            search_result = self._search_tool(
+                "crypto fear greed index bitcoin sentiment", limit=5
             )
 
             if not search_result.get("results"):
@@ -87,11 +92,7 @@ class CryptoSentimentService:
                 tool_id = tool.get("tool_id")
 
                 if "fear_greed" in tool_id.lower() or "sentiment" in tool_id.lower():
-                    result = execute_tool(
-                        tool_id=tool_id,
-                        search_id=search_id,
-                        params_to_tool=f'{{"limit": {limit}}}',
-                    )
+                    result = self._execute_tool(tool_id, search_id, {"limit": limit})
 
                     if result.get("success"):
                         data = result.get("result", {}).get("data", {})
@@ -154,6 +155,74 @@ class CryptoSentimentService:
             "classification": "Unknown",
             "error": "API not available",
         }
+
+    def _get_headers(self) -> Dict[str, str]:
+        """获取 API 请求头"""
+        return {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _search_tool(self, query: str, limit: int = 5) -> Dict:
+        """
+        搜索可用的工具
+
+        Args:
+            query: 搜索查询
+            limit: 返回数量限制
+
+        Returns:
+            搜索结果
+        """
+        try:
+            with httpx.Client(timeout=QVERIS_TIMEOUT) as client:
+                response = client.post(
+                    f"{QVERIS_BASE_URL}/search",
+                    headers=self._get_headers(),
+                    json={"query": query, "limit": limit},
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.warning(f"[CryptoSentimentService] 搜索工具失败: {e}")
+            return {}
+
+    def _execute_tool(
+        self,
+        tool_id: str,
+        search_id: str,
+        parameters: Dict[str, Any],
+        max_response_size: int = 20480,
+    ) -> Dict:
+        """
+        执行工具调用
+
+        Args:
+            tool_id: 工具 ID
+            search_id: 搜索 ID
+            parameters: 参数
+            max_response_size: 最大响应大小
+
+        Returns:
+            执行结果
+        """
+        try:
+            with httpx.Client(timeout=QVERIS_TIMEOUT) as client:
+                response = client.post(
+                    f"{QVERIS_BASE_URL}/tools/execute",
+                    params={"tool_id": tool_id},
+                    headers=self._get_headers(),
+                    json={
+                        "search_id": search_id,
+                        "parameters": parameters,
+                        "max_response_size": max_response_size,
+                    },
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.warning(f"[CryptoSentimentService] 执行工具失败: {e}")
+            return {"success": False, "error_message": str(e)}
 
     def get_sentiment_trend(self, days: int = 7) -> Optional[Dict[str, Any]]:
         """

@@ -10,7 +10,13 @@
 import logging
 from typing import Optional, Dict, Any, List
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+# QVeris API 配置
+QVERIS_BASE_URL = "https://qveris.ai/api/v1"
+QVERIS_TIMEOUT = 30  # 秒
 
 
 class CryptoNewsFetcher:
@@ -94,15 +100,10 @@ class CryptoNewsFetcher:
             return self._get_fallback_news(symbol, name)
 
         try:
-            from qveris import search_tools, execute_tool
-
-            # 构建搜索关键词
-            keywords = self._build_search_keywords(symbol, name)
-
+            # 使用 REST API 调用 QVeris
             # 搜索新闻工具
-            search_result = search_tools(
-                query="cryptocurrency news sentiment bitcoin ethereum blockchain",
-                limit=5,
+            search_result = self._search_tool(
+                "cryptocurrency news sentiment bitcoin ethereum blockchain", limit=5
             )
 
             if not search_result.get("results"):
@@ -124,11 +125,7 @@ class CryptoNewsFetcher:
                         "sort": "LATEST",
                     }
 
-                    result = execute_tool(
-                        tool_id=tool_id,
-                        search_id=search_id,
-                        params_to_tool=str(params).replace("'", '"'),
-                    )
+                    result = self._execute_tool(tool_id, search_id, params)
 
                     if result.get("success"):
                         data = result.get("result", {}).get("data", {})
@@ -235,6 +232,74 @@ class CryptoNewsFetcher:
                     break
 
         return events[:5]
+
+    def _get_headers(self) -> Dict[str, str]:
+        """获取 API 请求头"""
+        return {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _search_tool(self, query: str, limit: int = 5) -> Dict:
+        """
+        搜索可用的工具
+
+        Args:
+            query: 搜索查询
+            limit: 返回数量限制
+
+        Returns:
+            搜索结果
+        """
+        try:
+            with httpx.Client(timeout=QVERIS_TIMEOUT) as client:
+                response = client.post(
+                    f"{QVERIS_BASE_URL}/search",
+                    headers=self._get_headers(),
+                    json={"query": query, "limit": limit},
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.warning(f"[CryptoNewsFetcher] 搜索工具失败: {e}")
+            return {}
+
+    def _execute_tool(
+        self,
+        tool_id: str,
+        search_id: str,
+        parameters: Dict[str, Any],
+        max_response_size: int = 20480,
+    ) -> Dict:
+        """
+        执行工具调用
+
+        Args:
+            tool_id: 工具 ID
+            search_id: 搜索 ID
+            parameters: 参数
+            max_response_size: 最大响应大小
+
+        Returns:
+            执行结果
+        """
+        try:
+            with httpx.Client(timeout=QVERIS_TIMEOUT) as client:
+                response = client.post(
+                    f"{QVERIS_BASE_URL}/tools/execute",
+                    params={"tool_id": tool_id},
+                    headers=self._get_headers(),
+                    json={
+                        "search_id": search_id,
+                        "parameters": parameters,
+                        "max_response_size": max_response_size,
+                    },
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.warning(f"[CryptoNewsFetcher] 执行工具失败: {e}")
+            return {"success": False, "error_message": str(e)}
 
     def _get_fallback_news(self, symbol: str, name: str) -> Dict[str, Any]:
         """返回默认数据（当 API 不可用时）"""
