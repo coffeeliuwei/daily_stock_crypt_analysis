@@ -5,8 +5,8 @@ CryptoFetcher - 加密货币数据源 (Priority 1)
 ===================================
 
 数据来源（优先级）：
-1. CoinGecko (免费，无需API Key) - 首选
-2. Binance 公开API (免费，无需API Key) - 第二选择
+1. Binance 公开API (免费，无需API Key) - 首选，完整日线数据
+2. CoinGecko (免费，无需API Key) - 第二选择，数据点较少（约每4天一个点）
 3. CCXT (需要安装库) - 第三选择
 4. QVeris API (需要API Key) - 最后备选
 
@@ -157,16 +157,16 @@ class CryptoFetcher(BaseFetcher):
         self.coingecko_api_key = os.getenv("COINGECKO_API_KEY")
 
         logger.info(
-            "[CryptoFetcher] 数据源优先级: CoinGecko(免费) -> Binance(免费) -> CCXT -> QVeris"
+            "[CryptoFetcher] 数据源优先级: Binance(免费,完整日线) -> CoinGecko(免费) -> CCXT -> QVeris"
         )
 
-    # ==================== CoinGecko API (首选，免费) ====================
+    # ==================== CoinGecko API (第二选择，免费) ====================
 
     def _fetch_via_coingecko(
         self, stock_code: str, start_date: str, end_date: str
     ) -> Optional[pd.DataFrame]:
         """
-        通过 CoinGecko API 获取数据（首选，免费无需密钥）
+        通过 CoinGecko API 获取数据（免费无需密钥，数据点较少）
 
         Args:
             stock_code: 加密货币代码 (BTC, ETH 等)
@@ -388,13 +388,13 @@ class CryptoFetcher(BaseFetcher):
             time.sleep(self.COINGECKO_MIN_INTERVAL - elapsed)
         self._last_coingecko_request = time.time()
 
-    # ==================== Binance API (第二选择，免费) ====================
+    # ==================== Binance API (首选，免费，完整日线) ====================
 
     def _fetch_via_binance(
         self, stock_code: str, start_date: str, end_date: str
     ) -> Optional[pd.DataFrame]:
         """
-        通过 Binance 公开 API 获取数据（免费，无需密钥）
+        通过 Binance 公开 API 获取数据（免费，无需密钥，首选数据源）
 
         Args:
             stock_code: 加密货币代码
@@ -915,27 +915,15 @@ class CryptoFetcher(BaseFetcher):
         """
         获取原始数据
 
-        优先级: CoinGecko -> Binance -> CCXT -> QVeris
+        优先级: Binance -> CoinGecko -> CCXT -> QVeris
+
+        注意：Binance 提供完整的日线数据，CoinGecko OHLC 数据点较少（约每4天一个点）
         """
         errors = []
         error_details = []  # 存储详细错误信息
 
-        # 1. CoinGecko (首选，免费)
-        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: CoinGecko (免费)")
-        try:
-            df = self._fetch_via_coingecko(stock_code, start_date, end_date)
-            if df is not None and not df.empty:
-                logger.info(f"[CryptoFetcher] CoinGecko 成功: {len(df)} 条记录")
-                return df
-            errors.append("CoinGecko")
-            error_details.append("CoinGecko: 返回空数据")
-        except Exception as e:
-            errors.append("CoinGecko")
-            error_details.append(f"CoinGecko: {type(e).__name__}: {e}")
-            logger.warning(f"[CryptoFetcher] CoinGecko 失败: {e}")
-
-        # 2. Binance (第二选择，免费)
-        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: Binance (免费)")
+        # 1. Binance (首选，免费，完整日线数据)
+        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: Binance (免费，完整日线)")
         try:
             df = self._fetch_via_binance(stock_code, start_date, end_date)
             if df is not None and not df.empty:
@@ -947,6 +935,20 @@ class CryptoFetcher(BaseFetcher):
             errors.append("Binance")
             error_details.append(f"Binance: {type(e).__name__}: {e}")
             logger.warning(f"[CryptoFetcher] Binance 失败: {e}")
+
+        # 2. CoinGecko (第二选择，免费，数据点较少)
+        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: CoinGecko (免费，数据点较少)")
+        try:
+            df = self._fetch_via_coingecko(stock_code, start_date, end_date)
+            if df is not None and not df.empty:
+                logger.info(f"[CryptoFetcher] CoinGecko 成功: {len(df)} 条记录")
+                return df
+            errors.append("CoinGecko")
+            error_details.append("CoinGecko: 返回空数据")
+        except Exception as e:
+            errors.append("CoinGecko")
+            error_details.append(f"CoinGecko: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] CoinGecko 失败: {e}")
 
         # 3. CCXT (第三选择)
         logger.info(f"[CryptoFetcher] 尝试数据源 3/4: CCXT")

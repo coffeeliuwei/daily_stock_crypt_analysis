@@ -561,19 +561,14 @@ class StockAnalysisPipeline:
             except Exception as e:
                 logger.warning(f"{crypto_name}({code}) 获取历史数据失败: {e}")
 
-            # Step 3: 趋势分析（使用加密货币参数）
+            # Step 3: 趋势分析
             trend_result = None
             if daily_df is not None and not daily_df.empty:
                 try:
                     from src.stock_analyzer import StockTrendAnalyzer
 
                     trend_analyzer = StockTrendAnalyzer()
-                    # 加密货币使用不同的均线周期
-                    trend_result = trend_analyzer.analyze(
-                        daily_df,
-                        ma_periods=[7, 25, 99],  # 加密货币专用均线周期
-                        bias_threshold=8.0,  # 加密货币波动性更高
-                    )
+                    trend_result = trend_analyzer.analyze(daily_df, code)
                     logger.info(
                         f"{crypto_name}({code}) 趋势分析完成: {trend_result.trend_status}"
                     )
