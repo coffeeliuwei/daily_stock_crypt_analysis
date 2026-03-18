@@ -1296,19 +1296,20 @@ class StockAnalysisPipeline:
         analysis_query_id: Optional[str] = None,
     ) -> Optional[AnalysisResult]:
         """
-        处理单只股票的完整流程
+        处理单只股票/加密货币的完整流程
 
         包括：
-        1. 获取数据
-        2. 保存数据
-        3. AI 分析
-        4. 单股推送（可选，#55）
+        1. 加密货币路由检测（加密货币走独立管道）
+        2. 获取数据
+        3. 保存数据
+        4. AI 分析
+        5. 单股推送（可选，#55）
 
         此方法会被线程池调用，需要处理好异常
 
         Args:
             analysis_query_id: 查询链路关联 id
-            code: 股票代码
+            code: 股票代码或加密货币代码
             skip_analysis: 是否跳过 AI 分析
             single_stock_notify: 是否启用单股推送模式（每分析完一只立即推送）
             report_type: 报告类型枚举（从配置读取，Issue #119）
@@ -1317,6 +1318,13 @@ class StockAnalysisPipeline:
             AnalysisResult 或 None
         """
         logger.info(f"========== 开始处理 {code} ==========")
+
+        # === 加密货币路由：加密货币走独立分析管道，跳过股票数据获取流程 ===
+        from data_provider.base import _is_crypto_code
+
+        if _is_crypto_code(code):
+            effective_query_id = analysis_query_id or self.query_id or uuid.uuid4().hex
+            return self._analyze_crypto(code, report_type, effective_query_id)
 
         try:
             # Step 1: 获取并保存数据
