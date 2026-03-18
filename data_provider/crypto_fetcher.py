@@ -147,7 +147,7 @@ class CryptoFetcher(BaseFetcher):
             DataFrame 或 None
         """
         try:
-            symbol = self._to_binance_symbol(stock_code)  # Bybit 使用相同的 symbol 格式
+            symbol = self._to_bybit_symbol(stock_code)
             logger.debug(f"[Bybit] 映射 {stock_code} -> {symbol}")
 
             start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
@@ -260,7 +260,7 @@ class CryptoFetcher(BaseFetcher):
     ) -> Optional[UnifiedRealtimeQuote]:
         """通过 Bybit 获取实时行情"""
         try:
-            symbol = self._to_binance_symbol(stock_code)
+            symbol = self._to_bybit_symbol(stock_code)
             base_symbol = self._extract_base_symbol(stock_code)
 
             url = f"{self.BYBIT_BASE_URL}/market/tickers"
@@ -297,6 +297,16 @@ class CryptoFetcher(BaseFetcher):
         except Exception as e:
             logger.debug(f"[Bybit] 实时行情失败: {e}")
             return None
+
+    def _to_bybit_symbol(self, stock_code: str) -> str:
+        """转换为 Bybit symbol 格式 (如 BTCUSDT)"""
+        code = stock_code.strip().upper()
+        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
+            if code.endswith(suffix):
+                code = code[: -len(suffix)]
+                break
+        code = code.replace("-", "")
+        return f"{code}USDT"
 
     # ==================== Hyperliquid API (备选，无区域限制，免费) ====================
 
