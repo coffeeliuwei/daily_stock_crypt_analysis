@@ -133,8 +133,10 @@ def normalize_stock_code(stock_code: str) -> str:
 
 ETF_PREFIXES = ("51", "52", "56", "58", "15", "16", "18")
 
-# Supported cryptocurrency symbols (base symbols without quote currency)
+# Known cryptocurrency symbols (base symbols without quote currency)
+# This is a whitelist for fast detection, not exhaustive
 CRYPTO_SYMBOLS = {
+    # Major cryptocurrencies
     "BTC",
     "ETH",
     "BNB",
@@ -159,7 +161,6 @@ CRYPTO_SYMBOLS = {
     "OP",
     "INJ",
     "FIL",
-    "VET",
     "HBAR",
     "ICP",
     "SUI",
@@ -170,7 +171,6 @@ CRYPTO_SYMBOLS = {
     "FET",
     "GRT",
     "ALGO",
-    "VET",
     "MANA",
     "SAND",
     "AAVE",
@@ -188,18 +188,33 @@ CRYPTO_SYMBOLS = {
     "SUSHI",
     "1INCH",
     "CAKE",
+    "VET",
+    "TON",
+    "WLD",
+    "PEPE",
+    "BONK",
+    "WIF",
+    "JUP",
+    "PYTH",
+    "ONDO",
 }
+
+# Suffixes that indicate cryptocurrency trading pairs
+CRYPTO_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BUSD", "EUR", "BTC", "ETH", "BNB")
 
 
 def _is_crypto_code(code: str) -> bool:
     """
-    Detect cryptocurrency symbols.
+    Detect cryptocurrency symbols with flexible matching.
 
-    Supports formats:
-    - BTC, ETH (plain symbols)
-    - BTC-USD, BTC-USDT (with quote currency suffix)
-    - BTCUSDT, ETHUSDT (exchange format)
-    - btc, eth (lowercase)
+    Detection strategy (in order):
+    1. Direct match in known crypto whitelist (fast path)
+    2. Has crypto trading pair suffix (e.g., BTCUSDT, ETH-USD)
+    3. Format looks like crypto (3-10 uppercase letters, not a known stock/index)
+
+    This approach is inclusive - it's better to route a stock to crypto handler
+    (which will fail gracefully) than to route a crypto to stock handler
+    (which might return wrong data like ETF).
 
     Args:
         code: Stock/asset code to check
@@ -212,19 +227,31 @@ def _is_crypto_code(code: str) -> bool:
 
     normalized = code.strip().upper()
 
-    # Remove common quote currency suffixes to get base symbol
-    # BTC-USD -> BTC, BTCUSDT -> BTC, BTC/USDT -> BTC
-    base = normalized
-    for suffix in ["USDT", "USDC", "USD", "BUSD", "EUR", "BTC"]:
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
-            break
+    # Remove common separators first
+    base = normalized.replace("-", "").replace("/", "").replace("_", "")
 
-    # Remove separators
-    base = base.replace("-", "").replace("/", "").replace("_", "")
+    # Fast path 1: Direct match in known crypto whitelist
+    if base in CRYPTO_SYMBOLS:
+        return True
 
-    # Check if base symbol is in our known crypto list
-    return base in CRYPTO_SYMBOLS
+    # Fast path 2: Has crypto trading pair suffix (e.g., BTCUSDT -> BTC)
+    for suffix in CRYPTO_QUOTE_SUFFIXES:
+        if base.endswith(suffix) and len(base) > len(suffix):
+            potential_base = base[: -len(suffix)]
+            if potential_base in CRYPTO_SYMBOLS:
+                return True
+            # Unknown base with crypto suffix - likely a new crypto
+            if len(potential_base) >= 2 and potential_base.isalpha():
+                return True
+
+    # Fast path 3: Original code had crypto suffix pattern
+    # e.g., BTC-USD, ETH/USDT
+    original_upper = code.strip().upper()
+    for suffix in ["-USDT", "-USDC", "-USD", "-BUSD", "/USDT", "/USDC", "/USD"]:
+        if suffix in original_upper:
+            return True
+
+    return False
 
 
 def _is_us_market(code: str) -> bool:
@@ -896,7 +923,48 @@ class DataFetcherManager:
         total_fetchers = len(self._fetchers)
         request_start = time.time()
 
-        # 快速路径1：美股指数与美股股票直接路由到 YfinanceFetcher
+        # 快速路径1：加密货币直接路由到 QVerisFetcher（主数据源）
+        # 注意：必须先检查加密货币，因为 BTC/ETH 等符号会匹配美股正则 ^[A-Z]{1,5}$
+        if _is_crypto_code(stock_code):
+            for attempt, fetcher in enumerate(self._fetchers, start=1):
+                if fetcher.name == "QVerisFetcher":
+                    try:
+                        logger.info(
+                            f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] "
+                            f"加密货币 {stock_code} 直接路由（主数据源）..."
+                        )
+                        df = fetcher.get_daily_data(
+                            stock_code=stock_code,
+                            start_date=start_date,
+                            end_date=end_date,
+                            days=days,
+                        )
+                        if df is not None and not df.empty:
+                            elapsed = time.time() - request_start
+                            logger.info(
+                                f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                                f"rows={len(df)}, elapsed={elapsed:.2f}s"
+                            )
+                            return df, fetcher.name
+                    except Exception as e:
+                        error_type, error_reason = summarize_exception(e)
+                        error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
+                        logger.warning(
+                            f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
+                            f"error_type={error_type}, reason={error_reason}"
+                        )
+                        errors.append(error_msg)
+                    break
+            # QVerisFetcher failed for crypto
+            error_summary = f"加密货币 {stock_code} 获取失败:\n" + "\n".join(errors)
+            elapsed = time.time() - request_start
+            logger.error(
+                f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}"
+            )
+            raise DataFetchError(error_summary)
+
+        # 快速路径2：美股指数与美股股票直接路由到 YfinanceFetcher
+        # 注意：已先排除加密货币符号，避免 BTC/ETH 被误识别为美股
         if is_us_index_code(stock_code) or is_us_stock_code(stock_code):
             for attempt, fetcher in enumerate(self._fetchers, start=1):
                 if fetcher.name == "YfinanceFetcher":
@@ -931,45 +999,6 @@ class DataFetcherManager:
             error_summary = f"美股/美股指数 {stock_code} 获取失败:\n" + "\n".join(
                 errors
             )
-            elapsed = time.time() - request_start
-            logger.error(
-                f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}"
-            )
-            raise DataFetchError(error_summary)
-
-        # 快速路径2：加密货币直接路由到 QVerisFetcher（主数据源）
-        if _is_crypto_code(stock_code):
-            for attempt, fetcher in enumerate(self._fetchers, start=1):
-                if fetcher.name == "QVerisFetcher":
-                    try:
-                        logger.info(
-                            f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] "
-                            f"加密货币 {stock_code} 直接路由（主数据源）..."
-                        )
-                        df = fetcher.get_daily_data(
-                            stock_code=stock_code,
-                            start_date=start_date,
-                            end_date=end_date,
-                            days=days,
-                        )
-                        if df is not None and not df.empty:
-                            elapsed = time.time() - request_start
-                            logger.info(
-                                f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
-                                f"rows={len(df)}, elapsed={elapsed:.2f}s"
-                            )
-                            return df, fetcher.name
-                    except Exception as e:
-                        error_type, error_reason = summarize_exception(e)
-                        error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
-                        logger.warning(
-                            f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
-                            f"error_type={error_type}, reason={error_reason}"
-                        )
-                        errors.append(error_msg)
-                    break
-            # QVerisFetcher failed for crypto
-            error_summary = f"加密货币 {stock_code} 获取失败:\n" + "\n".join(errors)
             elapsed = time.time() - request_start
             logger.error(
                 f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}"
@@ -1475,7 +1504,7 @@ class DataFetcherManager:
 
         # 4. 所有数据源都失败
         logger.warning(f"[股票名称] 所有数据源都无法获取 {stock_code} 的名称")
-        return ""
+        return None
 
     def get_belong_boards(self, stock_code: str) -> List[Dict[str, Any]]:
         """

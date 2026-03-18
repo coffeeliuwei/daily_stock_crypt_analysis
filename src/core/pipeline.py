@@ -153,6 +153,12 @@ class StockAnalysisPipeline:
             # 首先获取股票名称
             stock_name = self.fetcher_manager.get_stock_name(code)
 
+            # 早期验证：如果无法获取股票名称，说明股票代码可能无效
+            if not stock_name:
+                error_msg = f"股票代码无效: {code} - 所有数据源都无法获取名称"
+                logger.error(f"[股票代码无效] {code}")
+                return False, error_msg
+
             today = date.today()
             # 注意：这里用自然日 date.today() 做“断点续传”判断。
             # 若在周末/节假日/非交易日运行，或机器时区不在中国，可能出现：
@@ -184,7 +190,7 @@ class StockAnalysisPipeline:
 
         except Exception as e:
             error_msg = f"获取/保存数据失败: {str(e)}"
-            logger.error(f"{stock_name}({code}) {error_msg}")
+            logger.error(f"[{code}] {error_msg}")
             return False, error_msg
 
     def analyze_stock(
@@ -218,6 +224,33 @@ class StockAnalysisPipeline:
         try:
             # 获取股票名称（优先从实时行情获取真实名称）
             stock_name = self.fetcher_manager.get_stock_name(code)
+
+            # 早期验证：如果无法获取股票名称，说明股票代码无效，跳过后续处理
+            if not stock_name:
+                logger.error(
+                    f"[股票代码无效] {code} - 所有数据源都无法获取名称，可能是不存在的股票代码"
+                )
+                return AnalysisResult(
+                    stock_code=code,
+                    stock_name=f"无效代码({code})",
+                    sentiment_score=50,
+                    trend_prediction="无法分析",
+                    operation_suggestion="观望",
+                    buy_price=None,
+                    stop_loss_price=None,
+                    target_price=None,
+                    checklist={},
+                    core_conclusion="股票代码无效，无法获取任何市场数据。请检查代码是否正确。",
+                    data_perspective={},
+                    battle_plan={},
+                    news_context=None,
+                    trend_analysis=None,
+                    realtime_quote=None,
+                    query_id=query_id,
+                    report_type=report_type,
+                    llm_model="validation",
+                    llm_usage={},
+                )
 
             # Step 1: 获取实时行情（量比、换手率等）- 使用统一入口，自动故障切换
             realtime_quote = None

@@ -32,6 +32,7 @@ STANDARD_COLUMNS = [
 ETF_PREFIXES = ("51", "52", "56", "58", "15", "16", "18")
 
 # 支持的加密货币符号（不含报价货币的基础符号）
+# 这是白名单用于快速匹配，不是完整列表
 CRYPTO_SYMBOLS = {
     "BTC",
     "ETH",
@@ -57,7 +58,6 @@ CRYPTO_SYMBOLS = {
     "OP",
     "INJ",
     "FIL",
-    "VET",
     "HBAR",
     "ICP",
     "SUI",
@@ -85,7 +85,19 @@ CRYPTO_SYMBOLS = {
     "SUSHI",
     "1INCH",
     "CAKE",
+    "VET",
+    "TON",
+    "WLD",
+    "PEPE",
+    "BONK",
+    "WIF",
+    "JUP",
+    "PYTH",
+    "ONDO",
 }
+
+# 加密货币交易对后缀
+CRYPTO_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BUSD", "EUR", "BTC", "ETH", "BNB")
 
 
 def unwrap_exception(exc: Exception) -> Exception:
@@ -192,13 +204,16 @@ def normalize_stock_code(stock_code: str) -> str:
 
 def _is_crypto_code(code: str) -> bool:
     """
-    Detect cryptocurrency symbols.
+    Detect cryptocurrency symbols with flexible matching.
 
-    Supports formats:
-    - BTC, ETH (plain symbols)
-    - BTC-USD, BTC-USDT (with quote currency suffix)
-    - BTCUSDT, ETHUSDT (exchange format)
-    - btc, eth (lowercase)
+    Detection strategy (in order):
+    1. Direct match in known crypto whitelist (fast path)
+    2. Has crypto trading pair suffix (e.g., BTCUSDT, ETH-USD)
+    3. Unknown symbol with crypto suffix pattern
+
+    This approach is inclusive - it's better to route a stock to crypto handler
+    (which will fail gracefully) than to route a crypto to stock handler
+    (which might return wrong data like ETF).
 
     Args:
         code: Stock/asset code to check
@@ -211,19 +226,31 @@ def _is_crypto_code(code: str) -> bool:
 
     normalized = code.strip().upper()
 
-    # Remove common quote currency suffixes to get base symbol
-    # BTC-USD -> BTC, BTCUSDT -> BTC, BTC/USDT -> BTC
-    base = normalized
-    for suffix in ["USDT", "USDC", "USD", "BUSD", "EUR", "BTC"]:
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
-            break
+    # Remove common separators first
+    base = normalized.replace("-", "").replace("/", "").replace("_", "")
 
-    # Remove separators
-    base = base.replace("-", "").replace("/", "").replace("_", "")
+    # Fast path 1: Direct match in known crypto whitelist
+    if base in CRYPTO_SYMBOLS:
+        return True
 
-    # Check if base symbol is in our known crypto list
-    return base in CRYPTO_SYMBOLS
+    # Fast path 2: Has crypto trading pair suffix (e.g., BTCUSDT -> BTC)
+    for suffix in CRYPTO_QUOTE_SUFFIXES:
+        if base.endswith(suffix) and len(base) > len(suffix):
+            potential_base = base[: -len(suffix)]
+            if potential_base in CRYPTO_SYMBOLS:
+                return True
+            # Unknown base with crypto suffix - likely a new crypto
+            if len(potential_base) >= 2 and potential_base.isalpha():
+                return True
+
+    # Fast path 3: Original code had crypto suffix pattern
+    # e.g., BTC-USD, ETH/USDT
+    original_upper = code.strip().upper()
+    for suffix in ["-USDT", "-USDC", "-USD", "-BUSD", "/USDT", "/USDC", "/USD"]:
+        if suffix in original_upper:
+            return True
+
+    return False
 
 
 def _is_us_market(code: str) -> bool:
