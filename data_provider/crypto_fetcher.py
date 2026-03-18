@@ -180,8 +180,14 @@ class CryptoFetcher(BaseFetcher):
             # 获取 CoinGecko ID
             coin_id = self._get_coingecko_id(stock_code)
             if not coin_id:
-                logger.debug(f"[CoinGecko] 无法映射 {stock_code} 到 CoinGecko ID")
+                logger.warning(
+                    f"[CoinGecko] 无法映射 {stock_code} 到 CoinGecko ID，跳过"
+                )
+                logger.debug(
+                    f"[CoinGecko] 支持的映射: {list(COINGECKO_ID_MAP.keys())[:10]}..."
+                )
                 return None
+            logger.debug(f"[CoinGecko] 映射 {stock_code} -> {coin_id}")
 
             # 速率限制
             self._rate_limit_coingecko()
@@ -202,9 +208,11 @@ class CryptoFetcher(BaseFetcher):
             else:
                 api_days = 365  # 默认最大值
 
+            logger.debug(f"[CoinGecko] 请求天数: {days}, API参数: {api_days}")
+
             # CoinGecko OHLC 接口限制最大 90 天（免费版）
             if days > 90:
-                logger.debug(f"[CoinGecko] 请求天数 {days} 超过 90 天限制，分段获取")
+                logger.info(f"[CoinGecko] 请求天数 {days} 超过 90 天限制，分段获取")
                 return self._fetch_coingecko_extended(coin_id, start_date, end_date)
 
             # 调用 OHLC 接口
@@ -214,22 +222,25 @@ class CryptoFetcher(BaseFetcher):
             if self.coingecko_api_key:
                 params["x_cg_demo_api_key"] = self.coingecko_api_key
 
-            logger.debug(f"[CoinGecko] 请求 {coin_id} OHLC, days={days}")
+            logger.debug(f"[CoinGecko] 请求 URL: {url}?vs_currency=usd&days={api_days}")
             resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
 
             if resp.status_code == 429:
-                logger.warning("[CoinGecko] 速率限制，稍后重试")
+                logger.warning("[CoinGecko] 速率限制 (429)，稍后重试")
                 time.sleep(2)
                 return None
 
             if resp.status_code != 200:
-                logger.debug(f"[CoinGecko] HTTP {resp.status_code}: {resp.text[:100]}")
+                logger.warning(
+                    f"[CoinGecko] HTTP {resp.status_code}: {resp.text[:200]}"
+                )
                 return None
 
             data = resp.json()
+            logger.debug(f"[CoinGecko] 返回数据点数: {len(data) if data else 0}")
 
             if not data:
-                logger.debug(f"[CoinGecko] 无数据返回")
+                logger.warning("[CoinGecko] API 返回空数据")
                 return None
 
             # 转换为 DataFrame
@@ -243,16 +254,24 @@ class CryptoFetcher(BaseFetcher):
             df["volume"] = 0  # CoinGecko OHLC 不提供 volume，设为 0
 
             # 过滤日期范围
+            original_count = len(df)
             df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+            logger.debug(f"[CoinGecko] 日期过滤: {original_count} -> {len(df)} 条")
 
             if df.empty:
+                logger.warning(
+                    f"[CoinGecko] 过滤后无数据，日期范围: {start_date} ~ {end_date}"
+                )
                 return None
 
             logger.info(f"[CoinGecko] 获取成功: {stock_code} {len(df)} 条记录")
             return df
 
         except Exception as e:
-            logger.debug(f"[CoinGecko] 获取失败: {e}")
+            logger.warning(f"[CoinGecko] 获取失败: {type(e).__name__}: {e}")
+            import traceback
+
+            logger.debug(f"[CoinGecko] 堆栈: {traceback.format_exc()}")
             return None
 
     def _fetch_coingecko_extended(
@@ -387,12 +406,15 @@ class CryptoFetcher(BaseFetcher):
         """
         try:
             symbol = self._to_binance_symbol(stock_code)
+            logger.debug(f"[Binance] 映射 {stock_code} -> {symbol}")
 
             start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
             end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+            logger.debug(f"[Binance] 时间范围: {start_date} ~ {end_date}")
 
             all_klines = []
             current_ts = start_ts
+            request_count = 0
 
             while current_ts < end_ts:
                 url = f"{self.BINANCE_BASE_URL}/klines"
@@ -404,24 +426,35 @@ class CryptoFetcher(BaseFetcher):
                     "limit": 500,  # Binance 单次最大 1000
                 }
 
+                request_count += 1
+                logger.debug(f"[Binance] 请求 #{request_count}: symbol={symbol}")
                 resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
 
                 if resp.status_code == 429:
-                    logger.warning("[Binance] 速率限制，等待...")
+                    logger.warning("[Binance] 速率限制 (429)，等待...")
                     time.sleep(2)
                     continue
 
                 if resp.status_code != 200:
-                    logger.debug(
-                        f"[Binance] HTTP {resp.status_code}: {resp.text[:100]}"
+                    logger.warning(
+                        f"[Binance] HTTP {resp.status_code}: {resp.text[:200]}"
                     )
+                    break
+
+                if resp.status_code == 400:
+                    logger.warning(f"[Binance] 请求参数错误: {resp.text[:200]}")
                     break
 
                 klines = resp.json()
                 if not klines:
+                    logger.debug(f"[Binance] 返回空数据，停止分页")
                     break
 
                 all_klines.extend(klines)
+                logger.debug(
+                    f"[Binance] 本次返回 {len(klines)} 条，累计 {len(all_klines)} 条"
+                )
+
                 last_ts = klines[-1][0]
                 if last_ts <= current_ts:
                     break
@@ -429,7 +462,7 @@ class CryptoFetcher(BaseFetcher):
                 time.sleep(0.1)  # 避免速率限制
 
             if not all_klines:
-                logger.debug(f"[Binance] 无数据返回: {symbol}")
+                logger.warning(f"[Binance] 无数据返回: symbol={symbol}")
                 return None
 
             # Binance kline 格式: [open_time, open, high, low, close, volume, ...]
@@ -458,16 +491,24 @@ class CryptoFetcher(BaseFetcher):
             ].astype(float)
 
             # 过滤日期范围
+            original_count = len(df)
             df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+            logger.debug(f"[Binance] 日期过滤: {original_count} -> {len(df)} 条")
 
             if df.empty:
+                logger.warning(
+                    f"[Binance] 过滤后无数据，日期范围: {start_date} ~ {end_date}"
+                )
                 return None
 
             logger.info(f"[Binance] 获取成功: {stock_code} {len(df)} 条记录")
             return df
 
         except Exception as e:
-            logger.debug(f"[Binance] 获取失败: {e}")
+            logger.warning(f"[Binance] 获取失败: {type(e).__name__}: {e}")
+            import traceback
+
+            logger.debug(f"[Binance] 堆栈: {traceback.format_exc()}")
             return None
 
     def _get_realtime_quote_via_binance(
@@ -572,24 +613,35 @@ class CryptoFetcher(BaseFetcher):
     ) -> Optional[pd.DataFrame]:
         """通过 QVeris 获取数据（最后备选）"""
         if not self._qveris_available:
+            logger.debug("[QVeris] API Key 未配置，跳过")
             return None
 
         try:
-            logger.debug(f"[CryptoFetcher] 通过 QVeris 获取 {stock_code} 数据")
+            logger.debug(
+                f"[QVeris] 开始搜索工具: {stock_code}, 日期范围: {start_date} ~ {end_date}"
+            )
 
             search_result = self._search_qveris_tool(
                 "cryptocurrency historical price OHLC candlestick bitcoin ethereum",
                 limit=5,
             )
 
-            if not search_result.get("results"):
-                logger.debug("[CryptoFetcher] QVeris 未找到合适的工具")
+            results = search_result.get("results", [])
+            if not results:
+                logger.warning("[QVeris] 未找到合适的加密货币历史数据工具")
                 return None
 
             search_id = search_result.get("search_id", "")
+            logger.debug(
+                f"[QVeris] 找到 {len(results)} 个工具，search_id={search_id[:20]}..."
+            )
 
-            for tool in search_result.get("results", []):
+            for idx, tool in enumerate(results):
                 tool_id = tool.get("tool_id")
+                tool_name = tool.get("name", "unknown")
+                logger.debug(
+                    f"[QVeris] 尝试工具 {idx + 1}/{len(results)}: {tool_name} (id={tool_id[:20]}...)"
+                )
 
                 params = {
                     "symbol": stock_code.upper(),
@@ -602,26 +654,37 @@ class CryptoFetcher(BaseFetcher):
 
                 if result.get("success"):
                     data = result.get("result", {}).get("data", {})
+                    logger.debug(
+                        f"[QVeris] 工具返回成功，数据类型: {type(data).__name__}"
+                    )
 
                     if isinstance(data, list) and len(data) > 0:
                         df = pd.DataFrame(data)
-                        logger.info(
-                            f"[CryptoFetcher] QVeris 获取成功: {len(df)} 条记录"
-                        )
+                        logger.info(f"[QVeris] 获取成功: {stock_code} {len(df)} 条记录")
                         return df
                     elif isinstance(data, dict):
                         for key in ["data", "items", "bars", "candles"]:
                             if key in data and isinstance(data[key], list):
                                 df = pd.DataFrame(data[key])
                                 logger.info(
-                                    f"[CryptoFetcher] QVeris 获取成功: {len(df)} 条记录"
+                                    f"[QVeris] 获取成功: {stock_code} {len(df)} 条记录 (key={key})"
                                 )
                                 return df
+                        logger.warning(
+                            f"[QVeris] 数据结构不支持，keys: {list(data.keys())}"
+                        )
+                else:
+                    error_msg = result.get("error_message", "unknown error")
+                    logger.debug(f"[QVeris] 工具执行失败: {error_msg}")
 
+            logger.warning(f"[QVeris] 所有工具都无法获取 {stock_code} 的历史数据")
             return None
 
         except Exception as e:
-            logger.debug(f"[CryptoFetcher] QVeris 获取失败: {e}")
+            logger.warning(f"[QVeris] 获取失败: {type(e).__name__}: {e}")
+            import traceback
+
+            logger.debug(f"[QVeris] 堆栈: {traceback.format_exc()}")
             return None
 
     def _get_realtime_quote_via_qveris(
@@ -712,27 +775,42 @@ class CryptoFetcher(BaseFetcher):
         self, stock_code: str, start_date: str, end_date: str
     ) -> pd.DataFrame:
         """通过 CCXT 获取数据"""
-        exchange = self._get_exchange()
-        symbol = self._to_ccxt_symbol(stock_code)
-
-        logger.debug(f"[CryptoFetcher] 通过 CCXT 获取 {symbol} 数据")
-
         try:
+            exchange = self._get_exchange()
+            symbol = self._to_ccxt_symbol(stock_code)
+            logger.debug(
+                f"[CCXT] 映射 {stock_code} -> {symbol}, 交易所: {self.exchange_name}"
+            )
+
             start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
             end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+            logger.debug(f"[CCXT] 时间范围: {start_date} ~ {end_date}")
 
             all_ohlcv = []
             current_ts = start_ts
+            request_count = 0
 
             while current_ts < end_ts:
-                ohlcv = exchange.fetch_ohlcv(
-                    symbol, timeframe="1d", since=current_ts, limit=1000
-                )
+                request_count += 1
+                logger.debug(f"[CCXT] 请求 #{request_count}: symbol={symbol}")
+
+                try:
+                    ohlcv = exchange.fetch_ohlcv(
+                        symbol, timeframe="1d", since=current_ts, limit=1000
+                    )
+                except Exception as fetch_err:
+                    logger.warning(f"[CCXT] fetch_ohlcv 失败: {fetch_err}")
+                    raise
 
                 if not ohlcv:
+                    logger.debug(f"[CCXT] 返回空数据，停止分页")
                     break
 
                 all_ohlcv.extend(ohlcv)
+                logger.debug(
+                    f"[CCXT] 本次返回 {len(ohlcv)} 条，累计 {len(all_ohlcv)} 条"
+                )
+
                 last_ts = ohlcv[-1][0]
                 if last_ts <= current_ts:
                     break
@@ -740,6 +818,7 @@ class CryptoFetcher(BaseFetcher):
                 time.sleep(0.1)
 
             if not all_ohlcv:
+                logger.warning(f"[CCXT] 未获取到 {symbol} 的数据")
                 raise DataFetchError(f"未获取到 {symbol} 的数据")
 
             df = pd.DataFrame(
@@ -748,12 +827,15 @@ class CryptoFetcher(BaseFetcher):
             )
 
             df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+            original_count = len(df)
             df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+            logger.debug(f"[CCXT] 日期过滤: {original_count} -> {len(df)} 条")
 
-            logger.info(f"[CryptoFetcher] CCXT 获取成功: {len(df)} 条记录")
+            logger.info(f"[CCXT] 获取成功: {stock_code} {len(df)} 条记录")
             return df
 
         except Exception as e:
+            logger.warning(f"[CCXT] 获取失败: {type(e).__name__}: {e}")
             if isinstance(e, DataFetchError):
                 raise
             raise DataFetchError(f"获取加密货币数据失败: {e}") from e
@@ -836,35 +918,70 @@ class CryptoFetcher(BaseFetcher):
         优先级: CoinGecko -> Binance -> CCXT -> QVeris
         """
         errors = []
+        error_details = []  # 存储详细错误信息
 
         # 1. CoinGecko (首选，免费)
-        df = self._fetch_via_coingecko(stock_code, start_date, end_date)
-        if df is not None and not df.empty:
-            return df
-        errors.append("CoinGecko")
+        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: CoinGecko (免费)")
+        try:
+            df = self._fetch_via_coingecko(stock_code, start_date, end_date)
+            if df is not None and not df.empty:
+                logger.info(f"[CryptoFetcher] CoinGecko 成功: {len(df)} 条记录")
+                return df
+            errors.append("CoinGecko")
+            error_details.append("CoinGecko: 返回空数据")
+        except Exception as e:
+            errors.append("CoinGecko")
+            error_details.append(f"CoinGecko: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] CoinGecko 失败: {e}")
 
         # 2. Binance (第二选择，免费)
-        df = self._fetch_via_binance(stock_code, start_date, end_date)
-        if df is not None and not df.empty:
-            return df
-        errors.append("Binance")
+        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: Binance (免费)")
+        try:
+            df = self._fetch_via_binance(stock_code, start_date, end_date)
+            if df is not None and not df.empty:
+                logger.info(f"[CryptoFetcher] Binance 成功: {len(df)} 条记录")
+                return df
+            errors.append("Binance")
+            error_details.append("Binance: 返回空数据")
+        except Exception as e:
+            errors.append("Binance")
+            error_details.append(f"Binance: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] Binance 失败: {e}")
 
         # 3. CCXT (第三选择)
+        logger.info(f"[CryptoFetcher] 尝试数据源 3/4: CCXT")
         try:
             df = self._fetch_via_ccxt(stock_code, start_date, end_date)
             if df is not None and not df.empty:
+                logger.info(f"[CryptoFetcher] CCXT 成功: {len(df)} 条记录")
                 return df
         except Exception as e:
-            logger.debug(f"[CryptoFetcher] CCXT 失败: {e}")
-        errors.append("CCXT")
+            errors.append("CCXT")
+            error_details.append(f"CCXT: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] CCXT 失败: {e}")
 
         # 4. QVeris (最后备选)
         if self._qveris_available:
-            df = self._fetch_via_qveris(stock_code, start_date, end_date)
-            if df is not None and not df.empty:
-                return df
-        errors.append("QVeris")
+            logger.info(f"[CryptoFetcher] 尝试数据源 4/4: QVeris")
+            try:
+                df = self._fetch_via_qveris(stock_code, start_date, end_date)
+                if df is not None and not df.empty:
+                    logger.info(f"[CryptoFetcher] QVeris 成功: {len(df)} 条记录")
+                    return df
+                errors.append("QVeris")
+                error_details.append("QVeris: 返回空数据")
+            except Exception as e:
+                errors.append("QVeris")
+                error_details.append(f"QVeris: {type(e).__name__}: {e}")
+                logger.warning(f"[CryptoFetcher] QVeris 失败: {e}")
+        else:
+            errors.append("QVeris")
+            error_details.append("QVeris: API Key 未配置")
 
+        # 打印详细错误摘要
+        logger.error(f"[CryptoFetcher] 所有数据源均失败:")
+        for detail in error_details:
+            logger.error(f"  - {detail}")
         raise DataFetchError(f"所有数据源均失败 ({', '.join(errors)}): {stock_code}")
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
