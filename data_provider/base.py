@@ -923,16 +923,17 @@ class DataFetcherManager:
         total_fetchers = len(self._fetchers)
         request_start = time.time()
 
-        # 快速路径1：加密货币直接路由到 QVerisFetcher（主数据源）
+        # 快速路径1：加密货币路由到 CryptoFetcher（主数据源，优先使用免费数据源）
+        # 数据源优先级：CoinGecko(免费) -> Binance(免费) -> CCXT -> QVeris(最后备选)
         # 注意：必须先检查加密货币，因为 BTC/ETH 等符号会匹配美股正则 ^[A-Z]{1,5}$
         if _is_crypto_code(stock_code):
-            # 优先尝试 QVerisFetcher
+            # 优先尝试 CryptoFetcher（包含 CoinGecko/Binance/CCXT）
             for attempt, fetcher in enumerate(self._fetchers, start=1):
-                if fetcher.name == "QVerisFetcher":
+                if fetcher.name == "CryptoFetcher":
                     try:
                         logger.info(
                             f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] "
-                            f"加密货币 {stock_code} 直接路由（主数据源）..."
+                            f"加密货币 {stock_code} 直接路由（主数据源：CoinGecko->Binance->CCXT）..."
                         )
                         df = fetcher.get_daily_data(
                             stock_code=stock_code,
@@ -957,13 +958,13 @@ class DataFetcherManager:
                         errors.append(error_msg)
                     break
 
-            # QVerisFetcher 失败，fallback 到 CryptoFetcher（有 CCXT 备用）
+            # CryptoFetcher 失败，fallback 到 QVerisFetcher（最后备选）
             for attempt, fetcher in enumerate(self._fetchers, start=1):
-                if fetcher.name == "CryptoFetcher":
+                if fetcher.name == "QVerisFetcher":
                     try:
                         logger.info(
                             f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] "
-                            f"加密货币 {stock_code} fallback（QVeris 失败后尝试 CCXT）..."
+                            f"加密货币 {stock_code} fallback（CryptoFetcher 失败后尝试 QVeris）..."
                         )
                         df = fetcher.get_daily_data(
                             stock_code=stock_code,

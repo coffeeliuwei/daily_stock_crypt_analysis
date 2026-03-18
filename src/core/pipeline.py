@@ -631,9 +631,7 @@ class StockAnalysisPipeline:
                     "resistance_level": trend_result.resistance_level
                     if trend_result
                     else None,
-                }
-                if trend_result
-                else None,
+                },
             }
 
             # Step 7: 调用 AI 分析（使用加密货币专用提示词）
