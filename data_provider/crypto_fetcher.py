@@ -5,8 +5,8 @@ CryptoFetcher - 加密货币数据源 (Priority 1)
 ===================================
 
 数据来源（优先级）：
-1. Bybit 公开API (免费，无需API Key，无区域限制) - 首选
-2. Hyperliquid 公开API (免费，无需API Key，无区域限制) - 第二选择
+1. Hyperliquid 公开API (免费，无需API Key，无区域限制) - 首选
+2. Bybit 公开API (免费，无需API Key，可能在云环境被 Cloudflare 屏蔽) - 第二选择
 3. CCXT (需要安装库) - 第三选择
 4. QVeris API (需要API Key) - 最后备选
 
@@ -84,12 +84,12 @@ class CryptoFetcher(BaseFetcher):
     加密货币数据源实现
 
     优先级：1（高优先级）
-    数据来源：Bybit -> Hyperliquid -> CCXT -> QVeris
+    数据来源：Hyperliquid -> Bybit -> CCXT -> QVeris
 
     关键策略：
-    - 首选 Bybit（无区域限制，从中国可访问）
-    - Bybit 失败时回退到 Hyperliquid（无区域限制）
-    - Hyperliquid 失败时回退到 CCXT
+    - 首选 Hyperliquid（无区域限制，稳定可靠）
+    - Hyperliquid 失败时回退到 Bybit（可能在云环境被 Cloudflare 屏蔽）
+    - Bybit 失败时回退到 CCXT
     - CCXT 失败时回退到 QVeris（需 API Key）
     - 自动转换加密货币代码格式
     """
@@ -121,7 +121,7 @@ class CryptoFetcher(BaseFetcher):
         self._qveris_available = bool(self.qveris_api_key)
 
         logger.info(
-            "[CryptoFetcher] 数据源优先级: Bybit(无区域限制) -> Hyperliquid(无区域限制) -> CCXT -> QVeris"
+            "[CryptoFetcher] 数据源优先级: Hyperliquid(无区域限制) -> Bybit -> CCXT -> QVeris"
         )
 
     # ==================== Bybit API (首选，无区域限制) ====================
@@ -806,31 +806,17 @@ class CryptoFetcher(BaseFetcher):
         """
         获取原始数据
 
-        优先级: Bybit -> Hyperliquid -> CCXT -> QVeris
+        优先级: Hyperliquid -> Bybit -> CCXT -> QVeris
 
         注意：
-        - Bybit 无区域限制，从中国可访问，提供完整日线数据（首选）
-        - Hyperliquid 无区域限制，免费，提供最多5000条历史数据
+        - Hyperliquid 无区域限制，免费，提供最多5000条历史数据（首选）
+        - Bybit 可能在某些云环境被 Cloudflare 屏蔽 (HTTP 403)
         """
         errors = []
         error_details = []  # 存储详细错误信息
 
-        # 1. Bybit (首选，无区域限制，完整日线数据)
-        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: Bybit (无区域限制，完整日线)")
-        try:
-            df = self._fetch_via_bybit(stock_code, start_date, end_date)
-            if df is not None and not df.empty:
-                logger.info(f"[CryptoFetcher] Bybit 成功: {len(df)} 条记录")
-                return df
-            errors.append("Bybit")
-            error_details.append("Bybit: 返回空数据")
-        except Exception as e:
-            errors.append("Bybit")
-            error_details.append(f"Bybit: {type(e).__name__}: {e}")
-            logger.warning(f"[CryptoFetcher] Bybit 失败: {e}")
-
-        # 2. Hyperliquid (无区域限制，免费)
-        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: Hyperliquid (无区域限制，免费)")
+        # 1. Hyperliquid (首选，无区域限制，免费)
+        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: Hyperliquid (无区域限制，免费)")
         try:
             df = self._fetch_via_hyperliquid(stock_code, start_date, end_date)
             if df is not None and not df.empty:
@@ -842,6 +828,20 @@ class CryptoFetcher(BaseFetcher):
             errors.append("Hyperliquid")
             error_details.append(f"Hyperliquid: {type(e).__name__}: {e}")
             logger.warning(f"[CryptoFetcher] Hyperliquid 失败: {e}")
+
+        # 2. Bybit (第二选择，可能在云环境被屏蔽)
+        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: Bybit (无区域限制，完整日线)")
+        try:
+            df = self._fetch_via_bybit(stock_code, start_date, end_date)
+            if df is not None and not df.empty:
+                logger.info(f"[CryptoFetcher] Bybit 成功: {len(df)} 条记录")
+                return df
+            errors.append("Bybit")
+            error_details.append("Bybit: 返回空数据")
+        except Exception as e:
+            errors.append("Bybit")
+            error_details.append(f"Bybit: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] Bybit 失败: {e}")
 
         # 3. CCXT (第三选择)
         logger.info(f"[CryptoFetcher] 尝试数据源 3/4: CCXT")
@@ -883,18 +883,18 @@ class CryptoFetcher(BaseFetcher):
         """
         获取实时行情
 
-        优先级: Bybit -> Hyperliquid -> CCXT -> QVeris
+        优先级: Hyperliquid -> Bybit -> CCXT -> QVeris
         """
         if not _is_crypto_code(stock_code):
             return None
 
-        # 1. Bybit (首选，无区域限制)
-        quote = self._get_realtime_quote_via_bybit(stock_code)
+        # 1. Hyperliquid (首选，无区域限制)
+        quote = self._get_realtime_quote_via_hyperliquid(stock_code)
         if quote:
             return quote
 
-        # 2. Hyperliquid (无区域限制)
-        quote = self._get_realtime_quote_via_hyperliquid(stock_code)
+        # 2. Bybit (可能在云环境被屏蔽)
+        quote = self._get_realtime_quote_via_bybit(stock_code)
         if quote:
             return quote
 
