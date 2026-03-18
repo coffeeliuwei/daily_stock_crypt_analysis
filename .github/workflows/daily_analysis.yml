@@ -88,6 +88,9 @@ jobs:
           # ==========================================
           # 数据源
           # ==========================================
+          # QVeris AI API（主数据源，Priority 0）
+          QVERIS_API_KEY: ${{ secrets.QVERIS_API_KEY }}
+          # Tushare Pro（收费数据源）
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           
           # ==========================================
@@ -208,6 +211,10 @@ jobs:
           echo "  AIHubMix Key:   $([ -n "$AIHUBMIX_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  OpenAI API Key: $([ -n "$OPENAI_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  Anthropic Key:  $([ -n "$ANTHROPIC_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
+          echo ""
+          echo "【数据源】"
+          echo "  QVeris API Key: $([ -n "$QVERIS_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
+          echo "  Tushare Token:  $([ -n "$TUSHARE_TOKEN" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo ""
           echo "【搜索引擎】"
           echo "  Bocha API Keys: $([ -n "$BOCHA_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
