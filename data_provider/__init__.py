@@ -9,44 +9,49 @@
 2. 自动故障切换
 3. 防封禁流控策略
 
-数据源优先级（动态调整）：
-【配置了 TUSHARE_TOKEN 时】
-1. TushareFetcher (Priority 0) - 🔥 最高优先级（动态提升）
-2. EfinanceFetcher (Priority 0) - 同优先级
-3. AkshareFetcher (Priority 1) - 来自 akshare 库
-4. PytdxFetcher (Priority 2) - 来自 pytdx 库（通达信）
-5. BaostockFetcher (Priority 3) - 来自 baostock 库
-6. YfinanceFetcher (Priority 4) - 来自 yfinance 库
+数据源优先级（三层架构）：
+【第一层：主数据源 - Priority 0】
+- QVerisFetcher (Priority 0) - 🔥 主数据源，统一 API 网关
 
-【未配置 TUSHARE_TOKEN 时】
-1. EfinanceFetcher (Priority 0) - 最高优先级，来自 efinance 库
-2. AkshareFetcher (Priority 1) - 来自 akshare 库
-3. PytdxFetcher (Priority 2) - 来自 pytdx 库（通达信）
-4. TushareFetcher (Priority 2) - 来自 tushare 库（不可用）
-5. BaostockFetcher (Priority 3) - 来自 baostock 库
-6. YfinanceFetcher (Priority 4) - 来自 yfinance 库
+【第二层：免费数据源 - Priority 1】
+- EfinanceFetcher (Priority 1) - 东方财富（免费）
+- AkshareFetcher (Priority 1) - Akshare（免费）
+- CryptoFetcher (Priority 1) - 加密货币（免费）
+- PytdxFetcher (Priority 2) - 通达信（免费）
 
-提示：优先级数字越小越优先，同优先级按初始化顺序排列
+【第三层：收费/兜底数据源 - Priority 3-4】
+- TushareFetcher (Priority 3) - Tushare Pro（需 Token）
+- BaostockFetcher (Priority 3) - Baostock（需注册）
+- YfinanceFetcher (Priority 4) - Yahoo Finance（国际兜底）
+
+提示：
+- 优先级数字越小越优先
+- QVerisFetcher 需配置 QVERIS_API_KEY
+- 未配置 API Key 的数据源会自动降级优先级
 """
 
 from .base import BaseFetcher, DataFetcherManager
+from .qveris_fetcher import QVerisFetcher
 from .efinance_fetcher import EfinanceFetcher
 from .akshare_fetcher import AkshareFetcher, is_hk_stock_code
 from .tushare_fetcher import TushareFetcher
 from .pytdx_fetcher import PytdxFetcher
 from .baostock_fetcher import BaostockFetcher
 from .yfinance_fetcher import YfinanceFetcher
+from .crypto_fetcher import CryptoFetcher
 from .us_index_mapping import is_us_index_code, is_us_stock_code, get_us_index_yf_symbol, US_INDEX_MAPPING
 
 __all__ = [
     'BaseFetcher',
     'DataFetcherManager',
+    'QVerisFetcher',
     'EfinanceFetcher',
     'AkshareFetcher',
     'TushareFetcher',
     'PytdxFetcher',
     'BaostockFetcher',
     'YfinanceFetcher',
+    'CryptoFetcher',
     'is_us_index_code',
     'is_us_stock_code',
     'is_hk_stock_code',

@@ -92,6 +92,7 @@ def safe_int(val: Any, default: Optional[int] = None) -> Optional[int]:
 
 class RealtimeSource(Enum):
     """实时行情数据源"""
+    QVERIS = "qveris"             # QVeris AI API（主数据源）
     EFINANCE = "efinance"           # 东方财富（efinance库）
     AKSHARE_EM = "akshare_em"       # 东方财富（akshare库）
     AKSHARE_SINA = "akshare_sina"   # 新浪财经
@@ -100,6 +101,7 @@ class RealtimeSource(Enum):
     TENCENT = "tencent"             # 腾讯直连
     SINA = "sina"                   # 新浪直连
     STOOQ = "stooq"                 # Stooq 美股兜底
+    CRYPTO = "crypto"               # 加密货币（CCXT/Binance等）
     FALLBACK = "fallback"           # 降级兜底
 
 

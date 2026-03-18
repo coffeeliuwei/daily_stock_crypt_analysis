@@ -117,6 +117,52 @@ def normalize_stock_code(stock_code: str) -> str:
 
 ETF_PREFIXES = ("51", "52", "56", "58", "15", "16", "18")
 
+# Supported cryptocurrency symbols (base symbols without quote currency)
+CRYPTO_SYMBOLS = {
+    'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'MATIC',
+    'LTC', 'SHIB', 'AVAX', 'LINK', 'ATOM', 'UNI', 'XMR', 'ETC', 'BCH',
+    'NEAR', 'APT', 'ARB', 'OP', 'INJ', 'FIL', 'VET', 'HBAR', 'ICP',
+    'SUI', 'SEI', 'TIA', 'IMX', 'RNDR', 'FET', 'GRT', 'ALGO', 'VET',
+    'MANA', 'SAND', 'AAVE', 'MKR', 'SNX', 'CRV', 'LDO', 'BLUR', 'APE',
+    'AXS', 'GALA', 'ENJ', 'COMP', 'YFI', 'SUSHI', '1INCH', 'CAKE',
+}
+
+
+def _is_crypto_code(code: str) -> bool:
+    """
+    Detect cryptocurrency symbols.
+
+    Supports formats:
+    - BTC, ETH (plain symbols)
+    - BTC-USD, BTC-USDT (with quote currency suffix)
+    - BTCUSDT, ETHUSDT (exchange format)
+    - btc, eth (lowercase)
+
+    Args:
+        code: Stock/asset code to check
+
+    Returns:
+        True if the code appears to be a cryptocurrency symbol
+    """
+    if not code:
+        return False
+
+    normalized = code.strip().upper()
+
+    # Remove common quote currency suffixes to get base symbol
+    # BTC-USD -> BTC, BTCUSDT -> BTC, BTC/USDT -> BTC
+    base = normalized
+    for suffix in ['USDT', 'USDC', 'USD', 'BUSD', 'EUR', 'BTC']:
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+            break
+
+    # Remove separators
+    base = base.replace('-', '').replace('/', '').replace('_', '')
+
+    # Check if base symbol is in our known crypto list
+    return base in CRYPTO_SYMBOLS
+
 
 def _is_us_market(code: str) -> bool:
     """判断是否为美股/美股指数代码（不含中文前后缀）。"""
@@ -155,7 +201,9 @@ def _is_etf_code(code: str) -> bool:
 
 
 def _market_tag(code: str) -> str:
-    """返回市场标签: cn/us/hk."""
+    """返回市场标签: cn/us/hk/crypto."""
+    if _is_crypto_code(code):
+        return "crypto"
     if _is_us_market(code):
         return "us"
     if _is_hk_market(code):
@@ -664,41 +712,59 @@ class DataFetcherManager:
         """
         初始化默认数据源列表
 
-        优先级动态调整逻辑：
-        - 如果配置了 TUSHARE_TOKEN：Tushare 优先级提升为 0（最高）
-        - 否则按默认优先级：
-          0. EfinanceFetcher (Priority 0) - 最高优先级
-          1. AkshareFetcher (Priority 1)
-          2. PytdxFetcher (Priority 2) - 通达信
-          2. TushareFetcher (Priority 2)
-          3. BaostockFetcher (Priority 3)
-          4. YfinanceFetcher (Priority 4)
+        三层优先级架构：
+        【第一层：主数据源 - Priority 0】
+          - QVerisFetcher (Priority 0) - 主数据源，统一 API 网关
+        
+        【第二层：免费数据源 - Priority 1-2】
+          - EfinanceFetcher (Priority 1) - 东方财富
+          - AkshareFetcher (Priority 1) - Akshare
+          - CryptoFetcher (Priority 1) - 加密货币
+          - PytdxFetcher (Priority 2) - 通达信
+        
+        【第三层：收费/兜底数据源 - Priority 3-4】
+          - TushareFetcher (Priority 3) - Tushare Pro（需 Token）
+          - BaostockFetcher (Priority 3) - Baostock
+          - YfinanceFetcher (Priority 4) - Yahoo Finance
+        
+        未配置 API Key 的数据源会自动降级优先级
         """
+        from .qveris_fetcher import QVerisFetcher
         from .efinance_fetcher import EfinanceFetcher
         from .akshare_fetcher import AkshareFetcher
         from .tushare_fetcher import TushareFetcher
         from .pytdx_fetcher import PytdxFetcher
         from .baostock_fetcher import BaostockFetcher
         from .yfinance_fetcher import YfinanceFetcher
-        # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
+        from .crypto_fetcher import CryptoFetcher
+        
+        # 第一层：主数据源
+        qveris = QVerisFetcher()
+        
+        # 第二层：免费数据源
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
-        tushare = TushareFetcher()  # 会根据 Token 配置自动调整优先级
-        pytdx = PytdxFetcher()      # 通达信数据源（可配 PYTDX_HOST/PYTDX_PORT）
+        crypto = CryptoFetcher()
+        pytdx = PytdxFetcher()
+        
+        # 第三层：收费/兜底数据源
+        tushare = TushareFetcher()
         baostock = BaostockFetcher()
         yfinance = YfinanceFetcher()
 
-        # 初始化数据源列表
+        # 初始化数据源列表（按优先级排序）
         self._fetchers = [
-            efinance,
-            akshare,
-            tushare,
-            pytdx,
-            baostock,
-            yfinance,
+            qveris,       # Priority 0 (主数据源)
+            efinance,     # Priority 1 (免费)
+            akshare,      # Priority 1 (免费)
+            crypto,       # Priority 1 (免费)
+            pytdx,        # Priority 2 (免费)
+            tushare,      # Priority 3 (收费)
+            baostock,     # Priority 3 (收费)
+            yfinance,     # Priority 4 (兜底)
         ]
 
-        # 按优先级排序（Tushare 如果配置了 Token 且初始化成功，优先级为 0）
+        # 按优先级排序
         self._fetchers.sort(key=lambda f: f.priority)
 
         # 构建优先级说明
