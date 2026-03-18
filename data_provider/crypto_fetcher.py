@@ -5,8 +5,8 @@ CryptoFetcher - 加密货币数据源 (Priority 1)
 ===================================
 
 数据来源（优先级）：
-1. Binance 公开API (免费，无需API Key) - 首选，完整日线数据
-2. CoinGecko (免费，无需API Key) - 第二选择，数据点较少（约每4天一个点）
+1. Bybit 公开API (免费，无需API Key，无区域限制) - 首选
+2. Hyperliquid 公开API (免费，无需API Key，无区域限制) - 第二选择
 3. CCXT (需要安装库) - 第三选择
 4. QVeris API (需要API Key) - 最后备选
 
@@ -78,49 +78,18 @@ CRYPTO_NAMES = {
     "UNI": "Uniswap",
 }
 
-# Symbol -> CoinGecko ID 映射
-COINGECKO_ID_MAP = {
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "BNB": "binancecoin",
-    "SOL": "solana",
-    "XRP": "ripple",
-    "ADA": "cardano",
-    "DOGE": "dogecoin",
-    "DOT": "polkadot",
-    "MATIC": "matic-network",
-    "LTC": "litecoin",
-    "SHIB": "shiba-inu",
-    "AVAX": "avalanche-2",
-    "LINK": "chainlink",
-    "ATOM": "cosmos",
-    "UNI": "uniswap",
-    "XMR": "monero",
-    "ETC": "ethereum-classic",
-    "BCH": "bitcoin-cash",
-    "NEAR": "near",
-    "APT": "aptos",
-    "ARB": "arbitrum",
-    "OP": "optimism",
-    "INJ": "injective-protocol",
-    "FIL": "filecoin",
-    "VET": "vechain",
-    "HBAR": "hedera-hashgraph",
-    "ICP": "internet-computer",
-}
-
 
 class CryptoFetcher(BaseFetcher):
     """
     加密货币数据源实现
 
     优先级：1（高优先级）
-    数据来源：CoinGecko -> Binance -> CCXT -> QVeris
+    数据来源：Bybit -> Hyperliquid -> CCXT -> QVeris
 
     关键策略：
-    - 首选免费的 CoinGecko API（无需密钥）
-    - CoinGecko 失败时回退到 Binance 公开 API
-    - Binance 失败时回退到 CCXT
+    - 首选 Bybit（无区域限制，从中国可访问）
+    - Bybit 失败时回退到 Hyperliquid（无区域限制）
+    - Hyperliquid 失败时回退到 CCXT
     - CCXT 失败时回退到 QVeris（需 API Key）
     - 自动转换加密货币代码格式
     """
@@ -129,14 +98,12 @@ class CryptoFetcher(BaseFetcher):
     priority = int(os.getenv("CRYPTO_PRIORITY", "1"))
 
     # API 配置
-    COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
-    BINANCE_BASE_URL = "https://api.binance.com/api/v3"
+    # Bybit API（无区域限制，首选）
+    BYBIT_BASE_URL = "https://api.bybit.com/v5"
+    # Hyperliquid API（无区域限制，免费）
+    HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"
     QVERIS_BASE_URL = "https://qveris.ai/api/v1"
     REQUEST_TIMEOUT = 15
-
-    # 速率限制（CoinGecko 免费版限制）
-    _last_coingecko_request = 0
-    COINGECKO_MIN_INTERVAL = 1.5  # 每次请求最小间隔（秒）
 
     def __init__(self, exchange: str = "binance"):
         """
@@ -153,248 +120,23 @@ class CryptoFetcher(BaseFetcher):
         self.qveris_api_key = os.getenv("QVERIS_API_KEY")
         self._qveris_available = bool(self.qveris_api_key)
 
-        # CoinGecko API Key（可选，有则速率限制更宽松）
-        self.coingecko_api_key = os.getenv("COINGECKO_API_KEY")
-
         logger.info(
-            "[CryptoFetcher] 数据源优先级: Binance(免费,完整日线) -> CoinGecko(免费) -> CCXT -> QVeris"
+            "[CryptoFetcher] 数据源优先级: Bybit(无区域限制) -> Hyperliquid(无区域限制) -> CCXT -> QVeris"
         )
 
-    # ==================== CoinGecko API (第二选择，免费) ====================
+    # ==================== Bybit API (首选，无区域限制) ====================
 
-    def _fetch_via_coingecko(
+    def _fetch_via_bybit(
         self, stock_code: str, start_date: str, end_date: str
     ) -> Optional[pd.DataFrame]:
         """
-        通过 CoinGecko API 获取数据（免费无需密钥，数据点较少）
+        通过 Bybit API 获取数据（免费，无区域限制，首选数据源）
 
-        Args:
-            stock_code: 加密货币代码 (BTC, ETH 等)
-            start_date: 开始日期 YYYY-MM-DD
-            end_date: 结束日期 YYYY-MM-DD
-
-        Returns:
-            DataFrame 或 None
-        """
-        try:
-            # 获取 CoinGecko ID
-            coin_id = self._get_coingecko_id(stock_code)
-            if not coin_id:
-                logger.warning(
-                    f"[CoinGecko] 无法映射 {stock_code} 到 CoinGecko ID，跳过"
-                )
-                logger.debug(
-                    f"[CoinGecko] 支持的映射: {list(COINGECKO_ID_MAP.keys())[:10]}..."
-                )
-                return None
-            logger.debug(f"[CoinGecko] 映射 {stock_code} -> {coin_id}")
-
-            # 速率限制
-            self._rate_limit_coingecko()
-
-            # 计算天数
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-            days = (end_dt - start_dt).days + 1
-
-            # CoinGecko OHLC API 只接受特定 days 值: 1, 7, 14, 30, 90, 180, 365
-            # 需要将请求的 days 向上取整到最近的有效值
-            VALID_COINGECKO_DAYS = [1, 7, 14, 30, 90, 180, 365]
-            api_days = days
-            for valid_days in VALID_COINGECKO_DAYS:
-                if valid_days >= days:
-                    api_days = valid_days
-                    break
-            else:
-                api_days = 365  # 默认最大值
-
-            logger.debug(f"[CoinGecko] 请求天数: {days}, API参数: {api_days}")
-
-            # CoinGecko OHLC 接口限制最大 90 天（免费版）
-            if days > 90:
-                logger.info(f"[CoinGecko] 请求天数 {days} 超过 90 天限制，分段获取")
-                return self._fetch_coingecko_extended(coin_id, start_date, end_date)
-
-            # 调用 OHLC 接口
-            url = f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/ohlc"
-            params = {"vs_currency": "usd", "days": str(api_days)}
-
-            if self.coingecko_api_key:
-                params["x_cg_demo_api_key"] = self.coingecko_api_key
-
-            logger.debug(f"[CoinGecko] 请求 URL: {url}?vs_currency=usd&days={api_days}")
-            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
-
-            if resp.status_code == 429:
-                logger.warning("[CoinGecko] 速率限制 (429)，稍后重试")
-                time.sleep(2)
-                return None
-
-            if resp.status_code != 200:
-                logger.warning(
-                    f"[CoinGecko] HTTP {resp.status_code}: {resp.text[:200]}"
-                )
-                return None
-
-            data = resp.json()
-            logger.debug(f"[CoinGecko] 返回数据点数: {len(data) if data else 0}")
-
-            if not data:
-                logger.warning("[CoinGecko] API 返回空数据")
-                return None
-
-            # 转换为 DataFrame
-            # CoinGecko OHLC 格式: [timestamp, open, high, low, close]
-            # 注意：CoinGecko OHLC 不返回 volume 数据
-            df = pd.DataFrame(
-                data, columns=["timestamp", "open", "high", "low", "close"]
-            )
-            df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df = df.drop(columns=["timestamp"])
-            df["volume"] = 0  # CoinGecko OHLC 不提供 volume，设为 0
-
-            # 过滤日期范围
-            original_count = len(df)
-            df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
-            logger.debug(f"[CoinGecko] 日期过滤: {original_count} -> {len(df)} 条")
-
-            if df.empty:
-                logger.warning(
-                    f"[CoinGecko] 过滤后无数据，日期范围: {start_date} ~ {end_date}"
-                )
-                return None
-
-            logger.info(f"[CoinGecko] 获取成功: {stock_code} {len(df)} 条记录")
-            return df
-
-        except Exception as e:
-            logger.warning(f"[CoinGecko] 获取失败: {type(e).__name__}: {e}")
-            import traceback
-
-            logger.debug(f"[CoinGecko] 堆栈: {traceback.format_exc()}")
-            return None
-
-    def _fetch_coingecko_extended(
-        self, coin_id: str, start_date: str, end_date: str
-    ) -> Optional[pd.DataFrame]:
-        """
-        分段获取超过 90 天的数据
-        """
-        all_dfs = []
-        current_start = datetime.strptime(start_date, "%Y-%m-%d")
-        final_end = datetime.strptime(end_date, "%Y-%m-%d")
-
-        while current_start < final_end:
-            current_end = min(current_start + timedelta(days=90), final_end)
-
-            self._rate_limit_coingecko()
-
-            # CoinGecko OHLC API 只接受特定 days 值，分段请求统一使用 90
-            url = f"{self.COINGECKO_BASE_URL}/coins/{coin_id}/ohlc"
-            params = {"vs_currency": "usd", "days": "90"}
-
-            if self.coingecko_api_key:
-                params["x_cg_demo_api_key"] = self.coingecko_api_key
-
-            try:
-                resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data:
-                        df = pd.DataFrame(
-                            data, columns=["timestamp", "open", "high", "low", "close"]
-                        )
-                        df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
-                        df = df.drop(columns=["timestamp"])
-                        df["volume"] = 0  # CoinGecko OHLC 不提供 volume
-                        all_dfs.append(df)
-            except Exception as e:
-                logger.debug(f"[CoinGecko] 分段获取失败: {e}")
-
-            current_start = current_end + timedelta(days=1)
-
-        if not all_dfs:
-            return None
-
-        result = pd.concat(all_dfs, ignore_index=True)
-        result = result.drop_duplicates(subset=["date"])
-        result = result.sort_values("date")
-
-        return result
-
-    def _get_realtime_quote_via_coingecko(
-        self, stock_code: str
-    ) -> Optional[UnifiedRealtimeQuote]:
-        """通过 CoinGecko 获取实时行情（免费）"""
-        try:
-            coin_id = self._get_coingecko_id(stock_code)
-            if not coin_id:
-                return None
-
-            self._rate_limit_coingecko()
-
-            url = f"{self.COINGECKO_BASE_URL}/simple/price"
-            params = {
-                "ids": coin_id,
-                "vs_currencies": "usd",
-                "include_24hr_change": "true",
-                "include_24hr_vol": "true",
-                "include_market_cap": "true",
-            }
-
-            if self.coingecko_api_key:
-                params["x_cg_demo_api_key"] = self.coingecko_api_key
-
-            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
-
-            if resp.status_code != 200:
-                return None
-
-            data = resp.json()
-            if coin_id not in data:
-                return None
-
-            coin_data = data[coin_id]
-            base_symbol = self._extract_base_symbol(stock_code)
-
-            return UnifiedRealtimeQuote(
-                code=stock_code.upper(),
-                name=CRYPTO_NAMES.get(base_symbol, base_symbol),
-                source=RealtimeSource.CRYPTO,
-                price=self._safe_float(coin_data.get("usd")),
-                change_pct=self._safe_float(coin_data.get("usd_24h_change")),
-                volume=self._safe_int(coin_data.get("usd_24h_vol")),
-                total_mv=self._safe_float(coin_data.get("usd_market_cap")),
-            )
-
-        except Exception as e:
-            logger.debug(f"[CoinGecko] 实时行情失败: {e}")
-            return None
-
-    def _get_coingecko_id(self, stock_code: str) -> Optional[str]:
-        """获取 CoinGecko ID"""
-        symbol = stock_code.strip().upper()
-        # 移除常见后缀
-        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
-            if symbol.endswith(suffix):
-                symbol = symbol[: -len(suffix)]
-                break
-        return COINGECKO_ID_MAP.get(symbol)
-
-    def _rate_limit_coingecko(self):
-        """CoinGecko 速率限制"""
-        elapsed = time.time() - self._last_coingecko_request
-        if elapsed < self.COINGECKO_MIN_INTERVAL:
-            time.sleep(self.COINGECKO_MIN_INTERVAL - elapsed)
-        self._last_coingecko_request = time.time()
-
-    # ==================== Binance API (首选，免费，完整日线) ====================
-
-    def _fetch_via_binance(
-        self, stock_code: str, start_date: str, end_date: str
-    ) -> Optional[pd.DataFrame]:
-        """
-        通过 Binance 公开 API 获取数据（免费，无需密钥，首选数据源）
+        Bybit API 特点：
+        - 无区域限制，可从中国访问
+        - 免费，无需 API Key 获取公开数据
+        - 高速率限制（60 req/sec）
+        - 支持最多 1000 条/请求
 
         Args:
             stock_code: 加密货币代码
@@ -405,67 +147,74 @@ class CryptoFetcher(BaseFetcher):
             DataFrame 或 None
         """
         try:
-            symbol = self._to_binance_symbol(stock_code)
-            logger.debug(f"[Binance] 映射 {stock_code} -> {symbol}")
+            symbol = self._to_binance_symbol(stock_code)  # Bybit 使用相同的 symbol 格式
+            logger.debug(f"[Bybit] 映射 {stock_code} -> {symbol}")
 
             start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
             end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
-            logger.debug(f"[Binance] 时间范围: {start_date} ~ {end_date}")
+            logger.debug(f"[Bybit] 时间范围: {start_date} ~ {end_date}")
 
             all_klines = []
             current_ts = start_ts
             request_count = 0
 
             while current_ts < end_ts:
-                url = f"{self.BINANCE_BASE_URL}/klines"
+                url = f"{self.BYBIT_BASE_URL}/market/kline"
                 params = {
+                    "category": "spot",
                     "symbol": symbol,
-                    "interval": "1d",
-                    "startTime": current_ts,
-                    "endTime": end_ts,
-                    "limit": 500,  # Binance 单次最大 1000
+                    "interval": "D",  # Daily
+                    "start": current_ts,
+                    "end": end_ts,
+                    "limit": 1000,  # Bybit 最大 1000
                 }
 
                 request_count += 1
-                logger.debug(f"[Binance] 请求 #{request_count}: symbol={symbol}")
+                logger.debug(f"[Bybit] 请求 #{request_count}: symbol={symbol}")
                 resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
 
                 if resp.status_code == 429:
-                    logger.warning("[Binance] 速率限制 (429)，等待...")
+                    logger.warning("[Bybit] 速率限制 (429)，等待...")
                     time.sleep(2)
                     continue
 
                 if resp.status_code != 200:
                     logger.warning(
-                        f"[Binance] HTTP {resp.status_code}: {resp.text[:200]}"
+                        f"[Bybit] HTTP {resp.status_code}: {resp.text[:200]}"
                     )
                     break
 
-                if resp.status_code == 400:
-                    logger.warning(f"[Binance] 请求参数错误: {resp.text[:200]}")
+                data = resp.json()
+                if data.get("retCode", -1) != 0:
+                    logger.warning(f"[Bybit] API 错误: {data.get('retMsg', 'Unknown')}")
                     break
 
-                klines = resp.json()
+                klines = data.get("result", {}).get("list", [])
                 if not klines:
-                    logger.debug(f"[Binance] 返回空数据，停止分页")
+                    logger.debug(f"[Bybit] 返回空数据，停止分页")
                     break
 
                 all_klines.extend(klines)
                 logger.debug(
-                    f"[Binance] 本次返回 {len(klines)} 条，累计 {len(all_klines)} 条"
+                    f"[Bybit] 本次返回 {len(klines)} 条，累计 {len(all_klines)} 条"
                 )
 
-                last_ts = klines[-1][0]
-                if last_ts <= current_ts:
+                # Bybit klines 按 startTime 倒序排列，最早在最后
+                # 格式: [startTime, openPrice, highPrice, lowPrice, closePrice, volume, turnover]
+                oldest_ts = min(int(k[0]) for k in klines)
+                if oldest_ts <= current_ts:
                     break
-                current_ts = last_ts + 86400000  # +1 day in ms
-                time.sleep(0.1)  # 避免速率限制
+                current_ts = oldest_ts - 86400000  # 向前移动
+                time.sleep(0.1)
 
             if not all_klines:
-                logger.warning(f"[Binance] 无数据返回: symbol={symbol}")
+                logger.warning(f"[Bybit] 无数据返回: symbol={symbol}")
                 return None
 
-            # Binance kline 格式: [open_time, open, high, low, close, volume, ...]
+            # Bybit kline 格式: [startTime, open, high, low, close, volume, turnover]
+            # 注意: 数据是倒序的，需要反转
+            all_klines.sort(key=lambda x: int(x[0]))
+
             df = pd.DataFrame(
                 all_klines,
                 columns=[
@@ -475,13 +224,156 @@ class CryptoFetcher(BaseFetcher):
                     "low",
                     "close",
                     "volume",
-                    "close_time",
-                    "quote_volume",
-                    "trades",
-                    "taker_buy_base",
-                    "taker_buy_quote",
-                    "ignore",
+                    "turnover",
                 ],
+            )
+
+            df["date"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms")
+            df = df[["date", "open", "high", "low", "close", "volume"]]
+            df[["open", "high", "low", "close", "volume"]] = df[
+                ["open", "high", "low", "close", "volume"]
+            ].astype(float)
+
+            # 过滤日期范围
+            original_count = len(df)
+            df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+            logger.debug(f"[Bybit] 日期过滤: {original_count} -> {len(df)} 条")
+
+            if df.empty:
+                logger.warning(
+                    f"[Bybit] 过滤后无数据，日期范围: {start_date} ~ {end_date}"
+                )
+                return None
+
+            logger.info(f"[Bybit] 获取成功: {stock_code} {len(df)} 条记录")
+            return df
+
+        except Exception as e:
+            logger.warning(f"[Bybit] 获取失败: {type(e).__name__}: {e}")
+            import traceback
+
+            logger.debug(f"[Bybit] 堆栈: {traceback.format_exc()}")
+            return None
+
+    def _get_realtime_quote_via_bybit(
+        self, stock_code: str
+    ) -> Optional[UnifiedRealtimeQuote]:
+        """通过 Bybit 获取实时行情"""
+        try:
+            symbol = self._to_binance_symbol(stock_code)
+            base_symbol = self._extract_base_symbol(stock_code)
+
+            url = f"{self.BYBIT_BASE_URL}/market/tickers"
+            params = {"category": "spot", "symbol": symbol}
+            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            if data.get("retCode", -1) != 0:
+                return None
+
+            tickers = data.get("result", {}).get("list", [])
+            if not tickers:
+                return None
+
+            ticker = tickers[0]
+
+            return UnifiedRealtimeQuote(
+                code=stock_code.upper(),
+                name=CRYPTO_NAMES.get(base_symbol, base_symbol),
+                source=RealtimeSource.CRYPTO,
+                price=self._safe_float(ticker.get("lastPrice")),
+                change_pct=self._safe_float(ticker.get("price24hPcnt")) * 100
+                if ticker.get("price24hPcnt")
+                else None,
+                volume=self._safe_float(ticker.get("volume24h")),
+                amount=self._safe_float(ticker.get("turnover24h")),
+                high=self._safe_float(ticker.get("highPrice24h")),
+                low=self._safe_float(ticker.get("lowPrice24h")),
+            )
+
+        except Exception as e:
+            logger.debug(f"[Bybit] 实时行情失败: {e}")
+            return None
+
+    # ==================== Hyperliquid API (备选，无区域限制，免费) ====================
+
+    def _fetch_via_hyperliquid(
+        self, stock_code: str, start_date: str, end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        通过 Hyperliquid API 获取数据（免费，无区域限制）
+
+        Hyperliquid API 特点：
+        - 无区域限制，可从中国访问
+        - 免费，无需 API Key 获取公开数据
+        - 支持最多 5000 条历史蜡烛
+        - 支持多种时间间隔: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M
+
+        Args:
+            stock_code: 加密货币代码
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame 或 None
+        """
+        try:
+            # Hyperliquid 使用简单的符号名 (BTC, ETH 等)
+            symbol = self._extract_base_symbol(stock_code)
+            logger.debug(f"[Hyperliquid] 映射 {stock_code} -> {symbol}")
+
+            start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+            end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+            logger.debug(f"[Hyperliquid] 时间范围: {start_date} ~ {end_date}")
+
+            url = f"{self.HYPERLIQUID_BASE_URL}/info"
+            payload = {
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": symbol,
+                    "interval": "1d",
+                    "startTime": start_ts,
+                    "endTime": end_ts,
+                },
+            }
+            headers = {"Content-Type": "application/json"}
+
+            logger.debug(f"[Hyperliquid] 请求: symbol={symbol}")
+            resp = requests.post(
+                url, json=payload, headers=headers, timeout=self.REQUEST_TIMEOUT
+            )
+
+            if resp.status_code != 200:
+                logger.warning(
+                    f"[Hyperliquid] HTTP {resp.status_code}: {resp.text[:200]}"
+                )
+                return None
+
+            candles = resp.json()
+            if not candles:
+                logger.warning(f"[Hyperliquid] 无数据返回: symbol={symbol}")
+                return None
+
+            logger.debug(f"[Hyperliquid] 返回 {len(candles)} 条记录")
+
+            # Hyperliquid candle 格式:
+            # t: open time, T: close time, s: symbol, i: interval
+            # o: open, h: high, l: low, c: close, v: volume, n: trades
+            df = pd.DataFrame(candles)
+
+            # 重命名列
+            df = df.rename(
+                columns={
+                    "t": "timestamp",
+                    "o": "open",
+                    "h": "high",
+                    "l": "low",
+                    "c": "close",
+                    "v": "volume",
+                }
             )
 
             df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
@@ -493,70 +385,59 @@ class CryptoFetcher(BaseFetcher):
             # 过滤日期范围
             original_count = len(df)
             df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
-            logger.debug(f"[Binance] 日期过滤: {original_count} -> {len(df)} 条")
+            logger.debug(f"[Hyperliquid] 日期过滤: {original_count} -> {len(df)} 条")
 
             if df.empty:
                 logger.warning(
-                    f"[Binance] 过滤后无数据，日期范围: {start_date} ~ {end_date}"
+                    f"[Hyperliquid] 过滤后无数据，日期范围: {start_date} ~ {end_date}"
                 )
                 return None
 
-            logger.info(f"[Binance] 获取成功: {stock_code} {len(df)} 条记录")
+            logger.info(f"[Hyperliquid] 获取成功: {stock_code} {len(df)} 条记录")
             return df
 
         except Exception as e:
-            logger.warning(f"[Binance] 获取失败: {type(e).__name__}: {e}")
+            logger.warning(f"[Hyperliquid] 获取失败: {type(e).__name__}: {e}")
             import traceback
 
-            logger.debug(f"[Binance] 堆栈: {traceback.format_exc()}")
+            logger.debug(f"[Hyperliquid] 堆栈: {traceback.format_exc()}")
             return None
 
-    def _get_realtime_quote_via_binance(
+    def _get_realtime_quote_via_hyperliquid(
         self, stock_code: str
     ) -> Optional[UnifiedRealtimeQuote]:
-        """通过 Binance 获取实时行情"""
+        """通过 Hyperliquid 获取实时行情"""
         try:
-            symbol = self._to_binance_symbol(stock_code)
+            symbol = self._extract_base_symbol(stock_code)
             base_symbol = self._extract_base_symbol(stock_code)
 
-            # 获取 ticker
-            url = f"{self.BINANCE_BASE_URL}/ticker/24hr"
-            params = {"symbol": symbol}
-            resp = requests.get(url, params=params, timeout=self.REQUEST_TIMEOUT)
+            url = f"{self.HYPERLIQUID_BASE_URL}/info"
+            payload = {"type": "allMids"}
+            headers = {"Content-Type": "application/json"}
+
+            resp = requests.post(
+                url, json=payload, headers=headers, timeout=self.REQUEST_TIMEOUT
+            )
 
             if resp.status_code != 200:
                 return None
 
             data = resp.json()
+            price = self._safe_float(data.get(symbol))
+
+            if not price:
+                return None
 
             return UnifiedRealtimeQuote(
                 code=stock_code.upper(),
                 name=CRYPTO_NAMES.get(base_symbol, base_symbol),
                 source=RealtimeSource.CRYPTO,
-                price=self._safe_float(data.get("lastPrice")),
-                change_pct=self._safe_float(data.get("priceChangePercent")),
-                change_amount=self._safe_float(data.get("priceChange")),
-                volume=self._safe_int(data.get("volume")),
-                amount=self._safe_float(data.get("quoteVolume")),
-                open_price=self._safe_float(data.get("openPrice")),
-                high=self._safe_float(data.get("highPrice")),
-                low=self._safe_float(data.get("lowPrice")),
-                pre_close=self._safe_float(data.get("prevClosePrice")),
+                price=price,
             )
 
         except Exception as e:
-            logger.debug(f"[Binance] 实时行情失败: {e}")
+            logger.debug(f"[Hyperliquid] 实时行情失败: {e}")
             return None
-
-    def _to_binance_symbol(self, stock_code: str) -> str:
-        """转换为 Binance symbol 格式 (如 BTCUSDT)"""
-        code = stock_code.strip().upper()
-        for suffix in ["USDT", "USDC", "USD", "BUSD"]:
-            if code.endswith(suffix):
-                code = code[: -len(suffix)]
-                break
-        code = code.replace("-", "")
-        return f"{code}USDT"
 
     # ==================== QVeris API (最后备选) ====================
 
@@ -915,40 +796,42 @@ class CryptoFetcher(BaseFetcher):
         """
         获取原始数据
 
-        优先级: Binance -> CoinGecko -> CCXT -> QVeris
+        优先级: Bybit -> Hyperliquid -> CCXT -> QVeris
 
-        注意：Binance 提供完整的日线数据，CoinGecko OHLC 数据点较少（约每4天一个点）
+        注意：
+        - Bybit 无区域限制，从中国可访问，提供完整日线数据（首选）
+        - Hyperliquid 无区域限制，免费，提供最多5000条历史数据
         """
         errors = []
         error_details = []  # 存储详细错误信息
 
-        # 1. Binance (首选，免费，完整日线数据)
-        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: Binance (免费，完整日线)")
+        # 1. Bybit (首选，无区域限制，完整日线数据)
+        logger.info(f"[CryptoFetcher] 尝试数据源 1/4: Bybit (无区域限制，完整日线)")
         try:
-            df = self._fetch_via_binance(stock_code, start_date, end_date)
+            df = self._fetch_via_bybit(stock_code, start_date, end_date)
             if df is not None and not df.empty:
-                logger.info(f"[CryptoFetcher] Binance 成功: {len(df)} 条记录")
+                logger.info(f"[CryptoFetcher] Bybit 成功: {len(df)} 条记录")
                 return df
-            errors.append("Binance")
-            error_details.append("Binance: 返回空数据")
+            errors.append("Bybit")
+            error_details.append("Bybit: 返回空数据")
         except Exception as e:
-            errors.append("Binance")
-            error_details.append(f"Binance: {type(e).__name__}: {e}")
-            logger.warning(f"[CryptoFetcher] Binance 失败: {e}")
+            errors.append("Bybit")
+            error_details.append(f"Bybit: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] Bybit 失败: {e}")
 
-        # 2. CoinGecko (第二选择，免费，数据点较少)
-        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: CoinGecko (免费，数据点较少)")
+        # 2. Hyperliquid (无区域限制，免费)
+        logger.info(f"[CryptoFetcher] 尝试数据源 2/4: Hyperliquid (无区域限制，免费)")
         try:
-            df = self._fetch_via_coingecko(stock_code, start_date, end_date)
+            df = self._fetch_via_hyperliquid(stock_code, start_date, end_date)
             if df is not None and not df.empty:
-                logger.info(f"[CryptoFetcher] CoinGecko 成功: {len(df)} 条记录")
+                logger.info(f"[CryptoFetcher] Hyperliquid 成功: {len(df)} 条记录")
                 return df
-            errors.append("CoinGecko")
-            error_details.append("CoinGecko: 返回空数据")
+            errors.append("Hyperliquid")
+            error_details.append("Hyperliquid: 返回空数据")
         except Exception as e:
-            errors.append("CoinGecko")
-            error_details.append(f"CoinGecko: {type(e).__name__}: {e}")
-            logger.warning(f"[CryptoFetcher] CoinGecko 失败: {e}")
+            errors.append("Hyperliquid")
+            error_details.append(f"Hyperliquid: {type(e).__name__}: {e}")
+            logger.warning(f"[CryptoFetcher] Hyperliquid 失败: {e}")
 
         # 3. CCXT (第三选择)
         logger.info(f"[CryptoFetcher] 尝试数据源 3/4: CCXT")
@@ -990,18 +873,18 @@ class CryptoFetcher(BaseFetcher):
         """
         获取实时行情
 
-        优先级: CoinGecko -> Binance -> CCXT -> QVeris
+        优先级: Bybit -> Hyperliquid -> CCXT -> QVeris
         """
         if not _is_crypto_code(stock_code):
             return None
 
-        # 1. CoinGecko (首选)
-        quote = self._get_realtime_quote_via_coingecko(stock_code)
+        # 1. Bybit (首选，无区域限制)
+        quote = self._get_realtime_quote_via_bybit(stock_code)
         if quote:
             return quote
 
-        # 2. Binance
-        quote = self._get_realtime_quote_via_binance(stock_code)
+        # 2. Hyperliquid (无区域限制)
+        quote = self._get_realtime_quote_via_hyperliquid(stock_code)
         if quote:
             return quote
 

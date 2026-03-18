@@ -36,7 +36,7 @@ from src.notification import NotificationService, NotificationChannel
 from src.search_service import SearchService
 from src.services.social_sentiment_service import SocialSentimentService
 from src.enums import ReportType
-from src.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
+from src.stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult, TrendStatus
 from src.core.trading_calendar import get_market_for_stock, is_market_open
 from data_provider.us_index_mapping import is_us_stock_code
 from bot.models import BotMessage
@@ -617,15 +617,30 @@ class StockAnalysisPipeline:
                 },
                 "fear_greed_index": fear_greed_data,
                 "trend": {
-                    "status": trend_result.trend_status if trend_result else "unknown",
-                    "is_bullish": trend_result.is_bullish if trend_result else False,
+                    "status": trend_result.trend_status.value
+                    if trend_result
+                    else "unknown",
+                    "is_bullish": (
+                        trend_result.trend_status
+                        in (
+                            TrendStatus.STRONG_BULL,
+                            TrendStatus.BULL,
+                            TrendStatus.WEAK_BULL,
+                        )
+                        if trend_result
+                        else False
+                    ),
                     "ma_alignment": trend_result.ma_alignment if trend_result else None,
-                    "support_level": trend_result.support_level
-                    if trend_result
-                    else None,
-                    "resistance_level": trend_result.resistance_level
-                    if trend_result
-                    else None,
+                    "support_level": (
+                        trend_result.support_levels[0]
+                        if trend_result and trend_result.support_levels
+                        else None
+                    ),
+                    "resistance_level": (
+                        trend_result.resistance_levels[0]
+                        if trend_result and trend_result.resistance_levels
+                        else None
+                    ),
                 },
             }
 
