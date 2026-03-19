@@ -44,18 +44,19 @@ class MarketStrategyBlueprint:
             f"### Action Framework\n{action_text}"
         )
 
-
-def to_markdown_block(self) -> str:
-    """Render blueprint as markdown section for template fallback report."""
-    dims = "\n".join([f"- **{dim.name}**: {dim.objective}" for dim in self.dimensions])
-    # 根据区域选择标题
-    if self.region == "cn":
-        section_title = "### 六、策略框架"
-    elif self.region == "crypto":
-        section_title = "### 六、策略框架"
-    else:
-        section_title = "### VI. Strategy Framework"
-    return f"{section_title}\n{dims}\n"
+    def to_markdown_block(self) -> str:
+        """Render blueprint as markdown section for template fallback report."""
+        dims = "\n".join(
+            [f"- **{dim.name}**: {dim.objective}" for dim in self.dimensions]
+        )
+        # 根据区域选择标题
+        if self.region == "cn":
+            section_title = "### 六、策略框架"
+        elif self.region == "crypto":
+            section_title = "### 六、策略框架"
+        else:
+            section_title = "### VI. Strategy Framework"
+        return f"{section_title}\n{dims}\n"
 
 
 CN_BLUEPRINT = MarketStrategyBlueprint(

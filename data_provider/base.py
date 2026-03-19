@@ -1221,6 +1221,26 @@ class DataFetcherManager:
             logger.warning(f"[实时行情] 美股指数 {stock_code} 无可用数据源")
             return None
 
+        # 加密货币由 CryptoFetcher 处理（必须在美股检查之前，因为 BTC/ETH 等符号匹配美股正则）
+        if _is_crypto_code(stock_code):
+            for fetcher in self._fetchers:
+                if fetcher.name == "CryptoFetcher":
+                    if hasattr(fetcher, "get_realtime_quote"):
+                        try:
+                            quote = fetcher.get_realtime_quote(stock_code)
+                            if quote is not None:
+                                logger.info(
+                                    f"[实时行情] 加密货币 {stock_code} 成功获取 (来源: CryptoFetcher)"
+                                )
+                                return quote
+                        except Exception as e:
+                            logger.warning(
+                                f"[实时行情] 加密货币 {stock_code} 获取失败: {e}"
+                            )
+                    break
+            logger.warning(f"[实时行情] 加密货币 {stock_code} 无可用数据源")
+            return None
+
         # 美股单独处理，使用 YfinanceFetcher
         if _is_us_code(stock_code):
             for fetcher in self._fetchers:

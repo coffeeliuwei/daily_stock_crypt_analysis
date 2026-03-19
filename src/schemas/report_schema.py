@@ -7,11 +7,39 @@ Report Engine - Pydantic Schema
 Defines AnalysisReportSchema for validating LLM JSON output.
 Aligns with SYSTEM_PROMPT in src/analyzer.py.
 Uses Optional for lenient parsing; business-layer integrity checks are separate.
+
+Example:
+    >>> from src.schemas.report_schema import AnalysisReportSchema
+    >>> data = {"stock_name": "贵州茅台", "sentiment_score": 75}
+    >>> report = AnalysisReportSchema(**data)
 """
 
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Type alias for fields that can be string or numeric (from LLM output)
+NumericOrStr = Union[int, float, str]
+
+__all__ = [
+    # Core schema classes
+    "AnalysisReportSchema",
+    "Dashboard",
+    "CoreConclusion",
+    "DataPerspective",
+    "Intelligence",
+    "BattlePlan",
+    # Nested schema classes
+    "PositionAdvice",
+    "TrendStatus",
+    "PricePosition",
+    "VolumeAnalysis",
+    "ChipStructure",
+    "SniperPoints",
+    "PositionStrategy",
+    # Type alias
+    "NumericOrStr",
+]
 
 
 class PositionAdvice(BaseModel):
@@ -35,37 +63,37 @@ class TrendStatus(BaseModel):
 
     ma_alignment: Optional[str] = None
     is_bullish: Optional[bool] = None
-    trend_score: Optional[Union[int, float, str]] = None
+    trend_score: Optional[NumericOrStr] = None
 
 
 class PricePosition(BaseModel):
     """Price position (may contain N/A strings)."""
 
-    current_price: Optional[Union[int, float, str]] = None
-    ma5: Optional[Union[int, float, str]] = None
-    ma10: Optional[Union[int, float, str]] = None
-    ma20: Optional[Union[int, float, str]] = None
-    bias_ma5: Optional[Union[int, float, str]] = None
+    current_price: Optional[NumericOrStr] = None
+    ma5: Optional[NumericOrStr] = None
+    ma10: Optional[NumericOrStr] = None
+    ma20: Optional[NumericOrStr] = None
+    bias_ma5: Optional[NumericOrStr] = None
     bias_status: Optional[str] = None
-    support_level: Optional[Union[int, float, str]] = None
-    resistance_level: Optional[Union[int, float, str]] = None
+    support_level: Optional[NumericOrStr] = None
+    resistance_level: Optional[NumericOrStr] = None
 
 
 class VolumeAnalysis(BaseModel):
     """Volume analysis."""
 
-    volume_ratio: Optional[Union[int, float, str]] = None
+    volume_ratio: Optional[NumericOrStr] = None
     volume_status: Optional[str] = None
-    turnover_rate: Optional[Union[int, float, str]] = None
+    turnover_rate: Optional[NumericOrStr] = None
     volume_meaning: Optional[str] = None
 
 
 class ChipStructure(BaseModel):
     """Chip structure."""
 
-    profit_ratio: Optional[Union[int, float, str]] = None
-    avg_cost: Optional[Union[int, float, str]] = None
-    concentration: Optional[Union[int, float, str]] = None
+    profit_ratio: Optional[NumericOrStr] = None
+    avg_cost: Optional[NumericOrStr] = None
+    concentration: Optional[NumericOrStr] = None
     chip_health: Optional[str] = None
 
 
@@ -91,10 +119,10 @@ class Intelligence(BaseModel):
 class SniperPoints(BaseModel):
     """Sniper points (ideal_buy, stop_loss, etc.)."""
 
-    ideal_buy: Optional[Union[str, int, float]] = None
-    secondary_buy: Optional[Union[str, int, float]] = None
-    stop_loss: Optional[Union[str, int, float]] = None
-    take_profit: Optional[Union[str, int, float]] = None
+    ideal_buy: Optional[NumericOrStr] = None
+    secondary_buy: Optional[NumericOrStr] = None
+    stop_loss: Optional[NumericOrStr] = None
+    take_profit: Optional[NumericOrStr] = None
 
 
 class PositionStrategy(BaseModel):

@@ -8,6 +8,7 @@ Covers:
 - Any provider configuration (Gemini / Anthropic / OpenAI / LLM_CHANNELS)
   does NOT trigger AttributeError (regression guard for the old bypass bug)
 """
+
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +25,7 @@ from unittest.mock import PropertyMock
 # Analyzer.generate_text()
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyzerGenerateText:
     def _make_analyzer(self):
         """Return a minimally configured GeminiAnalyzer with _call_litellm mocked."""
@@ -39,14 +41,19 @@ class TestAnalyzerGenerateText:
             cfg.openai_base_url = None
             mock_cfg.return_value = cfg
             from src.analyzer import GeminiAnalyzer
+
             analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
             analyzer._router = None
             return analyzer
 
     def test_generate_text_returns_llm_response(self):
         analyzer = self._make_analyzer()
-        with patch.object(analyzer, "_call_litellm", return_value="市场分析报告") as mock_call:
-            result = analyzer.generate_text("写一份复盘", max_tokens=1024, temperature=0.5)
+        with patch.object(
+            analyzer, "_call_litellm", return_value="市场分析报告"
+        ) as mock_call:
+            result = analyzer.generate_text(
+                "写一份复盘", max_tokens=1024, temperature=0.5
+            )
             assert result == "市场分析报告"
             mock_call.assert_called_once_with(
                 "写一份复盘",
@@ -55,7 +62,9 @@ class TestAnalyzerGenerateText:
 
     def test_generate_text_returns_none_on_failure(self):
         analyzer = self._make_analyzer()
-        with patch.object(analyzer, "_call_litellm", side_effect=Exception("LLM error")):
+        with patch.object(
+            analyzer, "_call_litellm", side_effect=Exception("LLM error")
+        ):
             result = analyzer.generate_text("prompt")
             assert result is None  # must not raise
 
@@ -73,14 +82,17 @@ class TestAnalyzerGenerateText:
 # market_analyzer uses generate_text(), not private attributes
 # ---------------------------------------------------------------------------
 
+
 class TestMarketAnalyzerBypassFix:
     def _make_market_analyzer_with_mock_generate_text(self, return_value="复盘报告"):
         """Return a MarketAnalyzer whose embedded Analyzer.generate_text is mocked."""
         from src.core.market_profile import CN_PROFILE
         from src.core.market_strategy import get_market_strategy_blueprint
 
-        with patch("src.analyzer.get_config") as mock_cfg, \
-             patch("src.market_analyzer.get_config") as mock_cfg2:
+        with (
+            patch("src.analyzer.get_config") as mock_cfg,
+            patch("src.market_analyzer.get_config") as mock_cfg2,
+        ):
             cfg = MagicMock()
             cfg.litellm_model = "gemini/gemini-2.0-flash"
             cfg.litellm_fallback_models = []
@@ -147,12 +159,15 @@ class TestMarketAnalyzerBypassFix:
         import ast
         import pathlib
 
-        src = pathlib.Path("src/market_analyzer.py").read_text()
+        src = pathlib.Path("src/market_analyzer.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         forbidden = {
-            "_model", "_router", "_use_openai", "_use_anthropic",  # historical
-            "_call_litellm",      # use generate_text() instead
-            "_litellm_available", # use is_available() instead
+            "_model",
+            "_router",
+            "_use_openai",
+            "_use_anthropic",  # historical
+            "_call_litellm",  # use generate_text() instead
+            "_litellm_available",  # use is_available() instead
         }
 
         violations = []

@@ -1,17 +1,35 @@
 # -*- coding: utf-8 -*-
 """
 Shared stock code utilities.
+
+This module provides common functions for stock code validation and normalization.
+Supports multiple formats:
+- A-share codes: 600519, 000001, SH600519, 600519.SH
+- HK codes: 00700, HK00700
+- US tickers: AAPL, TSLA, BRK.B
+
+Example:
+    >>> from src.services.stock_code_utils import normalize_code, is_code_like
+    >>> normalize_code("SH600519")
+    '600519'
+    >>> is_code_like("AAPL")
+    True
 """
 
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Optional, Tuple
+
+__all__ = [
+    "normalize_code",
+    "is_code_like",
+]
 
 
 # Known exchange prefixes (case-insensitive) and the digit lengths they accept.
 # e.g. SH600519 -> 600519, HK00700 -> 00700
-_PREFIX_DIGIT_LENS: dict = {
+_PREFIX_DIGIT_LENS: dict[str, Tuple[int, ...]] = {
     "SH": (6,),
     "SZ": (6,),
     "SS": (6,),
@@ -23,7 +41,7 @@ def _strip_exchange_prefix(text: str) -> Optional[str]:
     """Strip leading exchange prefix (SH/SZ/HK etc.) and return the bare digits, or None."""
     for prefix, digit_lens in _PREFIX_DIGIT_LENS.items():
         if text.startswith(prefix):
-            base = text[len(prefix):]
+            base = text[len(prefix) :]
             if base.isdigit() and len(base) in digit_lens:
                 return base
     return None

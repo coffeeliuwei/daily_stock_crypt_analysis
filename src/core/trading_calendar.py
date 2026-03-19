@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _XCALS_AVAILABLE = False
 try:
     import exchange_calendars as xcals
+
     _XCALS_AVAILABLE = True
 except ImportError:
     logger.warning(
@@ -45,14 +46,18 @@ def get_market_for_stock(code: str) -> Optional[str]:
     Infer market region for a stock code.
 
     Returns:
-        'cn' | 'hk' | 'us' | None (None = unrecognized, fail-open: treat as open)
+        'cn' | 'hk' | 'us' | 'crypto' | None (None = unrecognized, fail-open: treat as open)
     """
     if not code or not isinstance(code, str):
         return None
     code = (code or "").strip().upper()
 
     from data_provider import is_us_stock_code, is_us_index_code, is_hk_stock_code
+    from data_provider.utils import _is_crypto_code
 
+    # 加密货币检查必须在美股之前，因为 BTC/ETH 等符号匹配美股正则
+    if _is_crypto_code(code):
+        return "crypto"
     if is_us_stock_code(code) or is_us_index_code(code):
         return "us"
     if is_hk_stock_code(code):
@@ -101,6 +106,7 @@ def get_open_markets_today() -> Set[str]:
         return {"cn", "hk", "us"}
     result: Set[str] = set()
     from zoneinfo import ZoneInfo
+
     for mkt, tz_name in MARKET_TIMEZONE.items():
         try:
             tz = ZoneInfo(tz_name)
