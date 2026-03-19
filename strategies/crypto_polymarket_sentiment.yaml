@@ -1,0 +1,85 @@
+# Polymarket Sentiment Strategy / Polymarket 情绪指标策略
+# Uses Polymarket prediction market prices as sentiment indicators for crypto trading.
+
+name: crypto_polymarket_sentiment
+display_name: Polymarket 情绪指标策略
+description: 利用 Polymarket 预测市场价格作为加密货币市场情绪指标，辅助交易决策。
+category: sentiment
+core_rules: [5]
+market: crypto
+required_tools:
+  - get_daily_history
+  - analyze_trend
+  - search_stock_news
+
+instructions: |
+  **Polymarket 情绪指标策略（Sentiment Indicator Strategy）**
+
+  核心思想：
+  Polymarket 预测市场的价格 = 市场对事件发生概率的共识。
+  利用概率变化作为情绪指标，辅助加密货币交易决策。
+
+  ## 数据来源与事件映射
+
+  | 事件类型 | Polymarket 市场 | 对应加密货币影响 |
+  |---------|----------------|-----------------|
+  | SEC 批准 ETF | "Will BTC ETF be approved?" | BTC 直接利好 |
+  | 美联储降息 | "Fed rate cut in March?" | 全市场利好 |
+  | 监管政策 | "Will US ban stablecoins?" | USDT/USDC 利空 |
+  | 交易所事件 | "Will Binance face sanctions?" | BNB 利空 |
+  | 以太坊升级 | "ETH upgrade success?" | ETH 利好 |
+
+  ## 情绪信号判断
+
+  **概率变化强度：**
+  - 概率 24h 涨幅 > 10%：强烈看涨信号
+  - 概率 24h 涨幅 5-10%：温和看涨信号
+  - 概率 24h 跌幅 > 10%：强烈看跌信号
+  - 概率 24h 跌幅 5-10%：温和看跌信号
+
+  **概率绝对值判断：**
+  - 概率 > 70%：市场共识强，事件大概率发生
+  - 概率 50-70%：市场分歧，需结合其他指标
+  - 概率 30-50%：市场观望，谨慎操作
+  - 概率 < 30%：事件大概率不发生
+
+  ## 与技术面结合
+
+  **入场条件（需同时满足）：**
+  1. 技术面：MA7 > MA25 > MA99（多头排列）
+  2. 情绪面：相关事件概率 > 60% 且呈上升趋势
+  3. 成交量：放量确认
+
+  **离场条件：**
+  1. 技术面：跌破 MA99
+  2. 情绪面：关键事件概率逆转（如 ETF 批准概率从 70% 跌到 40%）
+  3. 事件结果公布：根据实际结果调整
+
+  ## 决策规则
+
+  1. **BTC ETF 相关事件**
+     - 批准概率 > 70% 且上升 → BTC 买入信号加强
+     - 批准概率 < 30% → BTC 观望或减仓
+
+  2. **美联储利率决策**
+     - 降息概率 > 60% → 风险资产整体利好
+     - 加息概率 > 60% → 降低仓位
+
+  3. **监管政策事件**
+     - 利空监管概率 > 50% → 降低仓位或观望
+     - 监管缓和概率 > 60% → 可考虑加仓
+
+  ## 风险控制
+
+  1. **流动性检查**：只参考 Polymarket 流动性 > $100,000 的市场
+  2. **多源验证**：Polymarket 数据需与主流新闻、分析师共识交叉验证
+  3. **事件时效**：临近事件（< 3 天）概率波动加剧，需更谨慎
+
+  评分调整建议：
+  - 强烈看涨事件信号（概率涨幅 > 10%）：`sentiment_score +15`
+  - 温和看涨事件信号（概率涨幅 5-10%）：`sentiment_score +8`
+  - 概率快速上升（1h +5%）：`sentiment_score +10`
+  - 概率快速下降（1h -5%）：`sentiment_score -10`
+  - 强烈看跌事件信号：`sentiment_score -15`
+  - 情绪与技术面共振（同向）：额外 `+10`
+  - 情绪与技术面背离（反向）：额外 `-5` 并提示风险
