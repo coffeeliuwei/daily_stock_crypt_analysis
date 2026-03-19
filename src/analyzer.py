@@ -1305,17 +1305,26 @@ class GeminiAnalyzer:
             )
 
         try:
+            # 加载加密货币策略指令
+            strategy_instructions = self._get_crypto_strategy_instructions()
+
             # 格式化加密货币专用提示词
             prompt = self._format_crypto_prompt(
-                crypto_context, name, news_context, fear_greed_data
+                crypto_context,
+                name,
+                news_context,
+                fear_greed_data,
+                strategy_instructions,
             )
 
             config = get_config()
-            max_retries = getattr(config, "llm_max_retries", 2)
+            max_retries = (
+                config.report_integrity_retry if config.report_integrity_enabled else 0
+            )
             retry_count = 0
             current_prompt = prompt
 
-            while retry_count <= max_retries:
+            while True:
                 llm_usage = {}
                 model_used = None
 
@@ -1351,15 +1360,41 @@ class GeminiAnalyzer:
                         result.dashboard = {}
                     result.dashboard["fear_greed_index"] = fear_greed_data
 
-                persist_llm_usage(
-                    llm_usage, model_used, call_type="crypto_analysis", stock_code=code
-                )
+                # 内容完整性校验（可选）
+                if not config.report_integrity_enabled:
+                    break
+                pass_integrity, missing_fields = self._check_content_integrity(result)
+                if pass_integrity:
+                    break
+                if retry_count < max_retries:
+                    current_prompt = self._build_integrity_retry_prompt(
+                        prompt,
+                        response_text,
+                        missing_fields,
+                    )
+                    retry_count += 1
+                    logger.info(
+                        "[CryptoLLM完整性] 必填字段缺失 %s，第 %d 次补全重试",
+                        missing_fields,
+                        retry_count,
+                    )
+                else:
+                    self._apply_placeholder_fill(result, missing_fields)
+                    logger.warning(
+                        "[CryptoLLM完整性] 必填字段缺失 %s，已占位补全，不阻塞流程",
+                        missing_fields,
+                    )
+                    break
 
-                logger.info(
-                    f"[CryptoLLM] {name}({code}) 分析完成: {result.trend_prediction}, 评分 {result.sentiment_score}"
-                )
+            persist_llm_usage(
+                llm_usage, model_used, call_type="crypto_analysis", stock_code=code
+            )
 
-                return result
+            logger.info(
+                f"[CryptoLLM] {name}({code}) 分析完成: {result.trend_prediction}, 评分 {result.sentiment_score}"
+            )
+
+            return result
 
         except Exception as e:
             logger.error(f"加密货币 AI 分析 {name}({code}) 失败: {e}")
@@ -1445,9 +1480,17 @@ class GeminiAnalyzer:
         name: str,
         news_context: Optional[str] = None,
         fear_greed_data: Optional[Dict[str, Any]] = None,
+        strategy_instructions: Optional[str] = None,
     ) -> str:
         """
         格式化加密货币分析提示词
+
+        Args:
+            context: 加密货币上下文数据
+            name: 加密货币名称
+            news_context: 新闻上下文
+            fear_greed_data: 恐惧贪婪指数数据
+            strategy_instructions: 策略指令（从 YAML 策略加载）
         """
         code = context.get("stock_code", "Unknown")
         realtime = context.get("realtime", {})
@@ -1540,7 +1583,37 @@ class GeminiAnalyzer:
 
 请输出完整的 JSON 决策仪表盘。
 """
+        # 注入策略指令（如果有）
+        if strategy_instructions:
+            prompt = f"{prompt}\n\n---\n\n## 📋 策略指导\n\n{strategy_instructions}"
+
         return prompt
+
+    def _get_crypto_strategy_instructions(self) -> Optional[str]:
+        """Load and return crypto market strategy instructions.
+
+        This method:
+        1. Gets the SkillManager from the factory
+        2. Activates all crypto market strategies
+        3. Returns the combined instruction text
+
+        Returns:
+            Combined strategy instructions string, or None if loading fails.
+        """
+        try:
+            from src.agent.factory import get_skill_manager
+
+            skill_manager = get_skill_manager()
+            skill_manager.activate_for_market("crypto")
+            instructions = skill_manager.get_skill_instructions_for_market("crypto")
+
+            if instructions:
+                logger.info("[CryptoLLM] Loaded crypto strategy instructions")
+            return instructions
+
+        except Exception as e:
+            logger.warning(f"[CryptoLLM] Failed to load crypto strategies: {e}")
+            return None
 
     def _format_prompt(
         self, context: Dict[str, Any], name: str, news_context: Optional[str] = None

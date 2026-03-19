@@ -19,7 +19,9 @@ from typing import Dict, List, Optional, Union
 logger = logging.getLogger(__name__)
 
 # Built-in strategies directory (project_root/strategies/)
-_BUILTIN_STRATEGIES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "strategies"
+_BUILTIN_STRATEGIES_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent / "strategies"
+)
 
 
 @dataclass
@@ -36,16 +38,19 @@ class Skill:
         description: Brief description of when to apply this strategy.
         instructions: Detailed natural language instructions injected into the system prompt.
         category: Strategy category — "trend" (趋势), "pattern" (形态), "reversal" (反转), "framework" (框架).
+        market: Target market — "stock" (股票) or "crypto" (加密货币).
         core_rules: List of core trading rule numbers this strategy relates to (1-7).
         required_tools: List of tool names this strategy depends on.
         enabled: Whether this strategy is currently active.
         source: Origin of this strategy — "builtin" or file path of a custom YAML.
     """
+
     name: str
     display_name: str
     description: str
     instructions: str
     category: str = "trend"
+    market: str = "stock"  # "stock" | "crypto"
     core_rules: List[int] = field(default_factory=list)
     required_tools: List[str] = field(default_factory=list)
     enabled: bool = False
@@ -94,6 +99,7 @@ def load_skill_from_yaml(filepath: Union[str, Path]) -> Skill:
         description=str(data["description"]).strip(),
         instructions=str(data["instructions"]).strip(),
         category=str(data.get("category", "trend")).strip(),
+        market=str(data.get("market", "stock")).strip(),
         core_rules=data.get("core_rules", []) or [],
         required_tools=data.get("required_tools", []) or [],
         enabled=False,
@@ -204,9 +210,7 @@ class SkillManager:
         for skill in skills:
             skill.source = str(directory / f"{skill.name}.yaml")
             if skill.name in self._skills:
-                logger.info(
-                    f"Custom strategy '{skill.name}' overrides built-in"
-                )
+                logger.info(f"Custom strategy '{skill.name}' overrides built-in")
             self.register(skill)
 
         logger.info(f"Loaded {len(skills)} custom strategies from {directory}")
@@ -254,7 +258,12 @@ class SkillManager:
             return ""
 
         # Group by category
-        categories = {"trend": "趋势", "pattern": "形态", "reversal": "反转", "framework": "框架"}
+        categories = {
+            "trend": "趋势",
+            "pattern": "形态",
+            "reversal": "反转",
+            "framework": "框架",
+        }
         grouped: Dict[str, List[Skill]] = {}
         for skill in active:
             cat = skill.category or "trend"
@@ -289,3 +298,91 @@ class SkillManager:
         for s in self.list_active_skills():
             tools.update(s.required_tools)
         return list(tools)
+
+    def get_skills_by_market(self, market: str) -> List[Skill]:
+        """Get all skills for a specific market.
+
+        Args:
+            market: "stock" or "crypto"
+
+        Returns:
+            List of skills matching the market.
+        """
+        return [s for s in self._skills.values() if s.market == market]
+
+    def list_crypto_skills(self) -> List[Skill]:
+        """List all crypto market strategies."""
+        return self.get_skills_by_market("crypto")
+
+    def list_stock_skills(self) -> List[Skill]:
+        """List all stock market strategies."""
+        return self.get_skills_by_market("stock")
+
+    def activate_for_market(
+        self, market: str, skill_names: Optional[List[str]] = None
+    ) -> None:
+        """Activate strategies for a specific market.
+
+        Args:
+            market: "stock" or "crypto"
+            skill_names: Optional list of specific skill names to activate.
+                         If None, activates all strategies for the market.
+        """
+        market_skills = self.get_skills_by_market(market)
+        if skill_names:
+            # Activate only specified skills that match the market
+            for s in market_skills:
+                s.enabled = s.name in skill_names
+        else:
+            # Activate all strategies for this market
+            for s in market_skills:
+                s.enabled = True
+
+        activated = [s.name for s in market_skills if s.enabled]
+        logger.info(f"Activated {market} market strategies: {activated}")
+
+    def get_skill_instructions_for_market(self, market: str) -> str:
+        """Generate combined instruction text for skills of a specific market.
+
+        Args:
+            market: "stock" or "crypto"
+
+        Returns:
+            Formatted instruction string for the market's active skills.
+        """
+        active = [s for s in self.get_skills_by_market(market) if s.enabled]
+        if not active:
+            return ""
+
+        categories = {
+            "trend": "趋势",
+            "pattern": "形态",
+            "reversal": "反转",
+            "framework": "框架",
+        }
+        grouped: Dict[str, List[Skill]] = {}
+        for skill in active:
+            cat = skill.category or "trend"
+            grouped.setdefault(cat, []).append(skill)
+
+        parts = []
+        idx = 1
+        ordered_keys = ["trend", "pattern", "reversal", "framework"]
+        for cat_key in ordered_keys + [k for k in grouped if k not in ordered_keys]:
+            skills_in_cat = grouped.get(cat_key, [])
+            if not skills_in_cat:
+                continue
+            cat_label = categories.get(cat_key, cat_key)
+            parts.append(f"#### {cat_label}类策略\n")
+            for skill in skills_in_cat:
+                rules_ref = ""
+                if skill.core_rules:
+                    rules_ref = f"（关联核心理念：第{'、'.join(str(r) for r in skill.core_rules)}条）"
+                parts.append(
+                    f"### 策略 {idx}: {skill.display_name} {rules_ref}\n\n"
+                    f"**适用场景**: {skill.description}\n\n"
+                    f"{skill.instructions}\n"
+                )
+                idx += 1
+
+        return "\n".join(parts)
