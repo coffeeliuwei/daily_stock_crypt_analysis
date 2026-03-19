@@ -136,6 +136,12 @@ class CryptoNewsFetcher:
         """
         获取加密货币新闻
 
+        优先级（免费源优先）：
+        1. Free Crypto News API（免费，无需 Key）
+        2. 中文 RSS 新闻源（免费，无需 Key）
+        3. QVeris API（需 API Key）
+        4. Alternative.me Fear & Greed Index（免费，无需 Key）
+
         Args:
             symbol: 加密货币代码（如 BTC）
             name: 加密货币名称（如 Bitcoin）
@@ -148,19 +154,61 @@ class CryptoNewsFetcher:
                 "key_events": [...],
             }
         """
-        if not self._qveris_available:
-            return self._get_fallback_news(symbol, name)
+        # 1. 尝试 Free Crypto News API（免费）
+        news = self._fetch_free_crypto_news(symbol, limit)
+        if news and news.get("news"):
+            return news
 
+        # 2. 尝试中文 RSS 新闻源（免费）
+        rss_news = self._fetch_rss_news(symbol, name, limit)
+        if rss_news and rss_news.get("news"):
+            return rss_news
+
+        # 3. 尝试 QVeris API（需 Key）
+        if self._qveris_available:
+            qveris_news = self._fetch_qveris_news(symbol, name, limit)
+            if qveris_news and qveris_news.get("news"):
+                return qveris_news
+
+        # 4. 获取恐惧贪婪指数作为情绪参考（免费）
+        fg_data = self._fetch_fear_greed_index()
+        if fg_data:
+            sentiment = self._map_fear_greed_to_sentiment(fg_data["value"])
+            return {
+                "symbol": symbol,
+                "news": [],
+                "sentiment": sentiment,
+                "fear_greed_index": fg_data,
+                "key_events": self._get_key_events_hint(),
+                "news_count": 0,
+                "source": "alternative.me",
+            }
+
+        # 5. 最终 fallback
+        return {
+            "symbol": symbol,
+            "news": [],
+            "sentiment": "neutral",
+            "key_events": self._get_key_events_hint(),
+            "news_count": 0,
+            "source": "none",
+        }
+
+    def _fetch_qveris_news(
+        self, symbol: str, name: str, limit: int = 10
+    ) -> Optional[Dict[str, Any]]:
+        """
+        从 QVeris API 获取新闻（需 API Key）
+        """
         try:
-            # 使用 REST API 调用 QVeris
             # 搜索新闻工具
             search_result = self._search_tool(
                 "cryptocurrency news sentiment bitcoin ethereum blockchain", limit=5
             )
 
             if not search_result.get("results"):
-                logger.warning("[CryptoNewsFetcher] 未找到新闻工具")
-                return self._get_fallback_news(symbol, name)
+                logger.warning("[CryptoNewsFetcher] QVeris: 未找到新闻工具")
+                return None
 
             search_id = search_result.get("search_id", "")
 
@@ -181,13 +229,16 @@ class CryptoNewsFetcher:
 
                     if result.get("success"):
                         data = result.get("result", {}).get("data", {})
-                        return self._parse_news_data(data, symbol)
+                        parsed = self._parse_news_data(data, symbol)
+                        if parsed.get("news"):
+                            parsed["source"] = "qveris"
+                            return parsed
 
-            return self._get_fallback_news(symbol, name)
+            return None
 
         except Exception as e:
-            logger.warning(f"[CryptoNewsFetcher] 获取新闻失败: {e}")
-            return self._get_fallback_news(symbol, name)
+            logger.warning(f"[CryptoNewsFetcher] QVeris 获取新闻失败: {e}")
+            return None
 
     def _build_search_keywords(self, symbol: str, name: str) -> List[str]:
         """构建搜索关键词"""
@@ -256,7 +307,7 @@ class CryptoNewsFetcher:
 
         except Exception as e:
             logger.warning(f"[CryptoNewsFetcher] 解析新闻失败: {e}")
-            return self._get_fallback_news(symbol, "")
+            return None
 
     def _extract_key_events(self, news_items: List[Dict]) -> List[str]:
         """从新闻中提取关键事件"""
@@ -352,49 +403,6 @@ class CryptoNewsFetcher:
         except Exception as e:
             logger.warning(f"[CryptoNewsFetcher] 执行工具失败: {e}")
             return {"success": False, "error_message": str(e)}
-
-    def _get_fallback_news(self, symbol: str, name: str) -> Dict[str, Any]:
-        """
-        返回新闻数据（当主 API 不可用时使用免费源）
-
-        优先级：
-        1. Free Crypto News API
-        2. 中文 RSS 新闻源
-        3. Alternative.me Fear & Greed Index
-        """
-        # 1. 尝试 Free Crypto News API
-        news = self._fetch_free_crypto_news(symbol)
-        if news and news.get("news"):
-            return news
-
-        # 2. 尝试中文 RSS 新闻源
-        rss_news = self._fetch_rss_news(symbol, name)
-        if rss_news and rss_news.get("news"):
-            return rss_news
-
-        # 3. 获取恐惧贪婪指数作为情绪参考
-        fg_data = self._fetch_fear_greed_index()
-        if fg_data:
-            sentiment = self._map_fear_greed_to_sentiment(fg_data["value"])
-            return {
-                "symbol": symbol,
-                "news": [],
-                "sentiment": sentiment,
-                "fear_greed_index": fg_data,
-                "key_events": self._get_key_events_hint(),
-                "news_count": 0,
-                "source": "alternative.me",
-            }
-
-        # 4. 最终 fallback
-        return {
-            "symbol": symbol,
-            "news": [],
-            "sentiment": "neutral",
-            "key_events": self._get_key_events_hint(),
-            "news_count": 0,
-            "source": "none",
-        }
 
     def _get_key_events_hint(self) -> List[str]:
         """返回建议关注的关键事件提示"""
