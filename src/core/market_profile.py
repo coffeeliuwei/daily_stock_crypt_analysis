@@ -54,8 +54,25 @@ US_PROFILE = MarketProfile(
 )
 
 
+CRYPTO_PROFILE = MarketProfile(
+    region="crypto",
+    mood_index_code="BTC",
+    news_queries=[
+        "加密货币 市场",
+        "Bitcoin BTC 行情",
+        "cryptocurrency market news",
+        "ETH Ethereum",
+    ],
+    prompt_index_hint="分析 BTC、ETH 等主流加密货币走势特点，关注恐惧贪婪指数变化",
+    has_market_stats=False,
+    has_sector_rankings=False,
+)
+
+
 def get_profile(region: str) -> MarketProfile:
     """根据 region 返回对应的 MarketProfile"""
+    if region == "crypto":
+        return CRYPTO_PROFILE
     if region == "us":
         return US_PROFILE
     return CN_PROFILE
