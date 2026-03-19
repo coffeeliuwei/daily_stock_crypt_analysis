@@ -4,13 +4,20 @@
 加密货币新闻获取服务
 ===================================
 
-通过 QVeris API 获取加密货币相关新闻和情绪分析
+通过多种 API 获取加密货币相关新闻和情绪分析：
+- QVeris API（主源，需 API Key）
+- Free Crypto News API（免费，无需 Key）
+- Alternative.me Fear & Greed Index（免费，无需 Key）
+- RSS 中文新闻源（免费，无需 Key）
 """
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+from xml.etree import ElementTree
 
 import httpx
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +25,55 @@ logger = logging.getLogger(__name__)
 QVERIS_BASE_URL = "https://qveris.ai/api/v1"
 QVERIS_TIMEOUT = 30  # 秒
 
+# 免费 API 配置
+FREE_CRYPTO_NEWS_URL = "https://cryptocurrency.cv/api/news"
+FEAR_GREED_URL = "https://api.alternative.me/fng/"
+
+# 中文 RSS 新闻源
+CHINESE_RSS_SOURCES = {
+    "odaily": {
+        "name": "Odaily 星球日报",
+        "url": "https://www.odaily.news/rss",
+        "priority": 1,
+    },
+    "jinse": {
+        "name": "金色财经",
+        "url": "https://www.jinse.com/rss",
+        "priority": 2,
+    },
+    "8btc": {
+        "name": "巴比特",
+        "url": "https://www.8btc.com/rss",
+        "priority": 3,
+    },
+    "panews": {
+        "name": "PANews",
+        "url": "https://panewslab.com/zh/rss",
+        "priority": 4,
+    },
+    "blockbeats": {
+        "name": "区块律动",
+        "url": "https://www.theblockbeats.info/rss",
+        "priority": 5,
+    },
+}
+
 
 class CryptoNewsFetcher:
     """
     加密货币新闻获取服务
 
-    通过 QVeris API 获取：
-    - 加密货币相关新闻
-    - 新闻情绪分析
-    - 市场热点
+    支持多种数据源（按优先级）：
+    1. QVeris API（主源，需 API Key）
+    2. Free Crypto News API（免费，无需 Key，200+ 新闻源）
+    3. 中文 RSS 新闻源（免费，无需 Key）
+    4. Alternative.me Fear & Greed Index（免费，无需 Key）
+
+    使用方式：
+        fetcher = CryptoNewsFetcher()  # 无需 API Key 也可工作
+        news = fetcher.fetch_crypto_news("BTC", "Bitcoin")
+        fg = fetcher.fetch_fear_greed_index()
+        chinese = fetcher.fetch_chinese_news("ETH")
     """
 
     # 加密货币关键词映射
@@ -75,7 +122,12 @@ class CryptoNewsFetcher:
 
     @property
     def is_available(self) -> bool:
-        """服务是否可用"""
+        """服务是否可用（免费源始终可用）"""
+        return True  # 免费源始终可用
+
+    @property
+    def is_premium_available(self) -> bool:
+        """高级 API（QVeris）是否可用"""
         return self._qveris_available
 
     def fetch_crypto_news(
@@ -302,15 +354,391 @@ class CryptoNewsFetcher:
             return {"success": False, "error_message": str(e)}
 
     def _get_fallback_news(self, symbol: str, name: str) -> Dict[str, Any]:
-        """返回默认数据（当 API 不可用时）"""
+        """
+        返回新闻数据（当主 API 不可用时使用免费源）
+
+        优先级：
+        1. Free Crypto News API
+        2. 中文 RSS 新闻源
+        3. Alternative.me Fear & Greed Index
+        """
+        # 1. 尝试 Free Crypto News API
+        news = self._fetch_free_crypto_news(symbol)
+        if news and news.get("news"):
+            return news
+
+        # 2. 尝试中文 RSS 新闻源
+        rss_news = self._fetch_rss_news(symbol, name)
+        if rss_news and rss_news.get("news"):
+            return rss_news
+
+        # 3. 获取恐惧贪婪指数作为情绪参考
+        fg_data = self._fetch_fear_greed_index()
+        if fg_data:
+            sentiment = self._map_fear_greed_to_sentiment(fg_data["value"])
+            return {
+                "symbol": symbol,
+                "news": [],
+                "sentiment": sentiment,
+                "fear_greed_index": fg_data,
+                "key_events": self._get_key_events_hint(),
+                "news_count": 0,
+                "source": "alternative.me",
+            }
+
+        # 4. 最终 fallback
         return {
             "symbol": symbol,
             "news": [],
-            "sentiment": "unknown",
-            "key_events": [],
+            "sentiment": "neutral",
+            "key_events": self._get_key_events_hint(),
             "news_count": 0,
-            "error": "News API not available",
+            "source": "none",
         }
+
+    def _get_key_events_hint(self) -> List[str]:
+        """返回建议关注的关键事件提示"""
+        return [
+            "建议关注美联储议息会议及利率决议",
+            "关注 BTC/ETH ETF 资金流向",
+            "留意监管政策动态",
+        ]
+
+    def _fetch_free_crypto_news(
+        self, symbol: str, limit: int = 10
+    ) -> Optional[Dict[str, Any]]:
+        """
+        从 Free Crypto News API 获取新闻（无需 API Key）
+
+        API 文档: https://cryptocurrency.cv/api/news
+        支持分类过滤：bitcoin, ethereum, defi, nft, trading 等
+        """
+        try:
+            # 根据币种选择分类
+            symbol_upper = symbol.upper().replace("USDT", "").replace("USD", "")
+            category_map = {
+                "BTC": "bitcoin",
+                "ETH": "ethereum",
+                "SOL": "solana",
+            }
+            category = category_map.get(symbol_upper, "")
+
+            # 构建请求 URL
+            if category:
+                url = f"{FREE_CRYPTO_NEWS_URL}?limit={limit}&category={category}"
+            else:
+                url = f"{FREE_CRYPTO_NEWS_URL}?limit={limit}"
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+
+            articles = data.get("articles", [])
+            if not articles:
+                return None
+
+            # 过滤相关新闻
+            symbol_upper = symbol.upper().replace("USDT", "").replace("USD", "")
+            keywords = self.CRYPTO_KEYWORDS.get(
+                symbol_upper, [symbol_lower := symbol.lower()]
+            )
+
+            filtered_news = []
+            for article in articles:
+                title = article.get("title", "").lower()
+                description = article.get("description", "")
+                summary = description.lower() if description else ""
+                text = f"{title} {summary}"
+
+                # 检查是否与目标币种相关
+                if any(kw in text for kw in keywords) or symbol_upper == "CRYPTO":
+                    filtered_news.append(
+                        {
+                            "title": article.get("title", ""),
+                            "summary": (description[:500] if description else ""),
+                            "source": article.get("source", "Unknown"),
+                            "time": article.get("pubDate", ""),
+                            "url": article.get("link", ""),
+                            "sentiment": "neutral",
+                        }
+                    )
+
+            if not filtered_news:
+                # 如果没有过滤到相关新闻，返回前几条作为市场动态
+                filtered_news = [
+                    {
+                        "title": a.get("title", ""),
+                        "summary": (
+                            a.get("description", "")[:500]
+                            if a.get("description")
+                            else ""
+                        ),
+                        "source": a.get("source", "Unknown"),
+                        "time": a.get("pubDate", ""),
+                        "url": a.get("link", ""),
+                        "sentiment": "neutral",
+                    }
+                    for a in articles[:5]
+                ]
+
+            return {
+                "symbol": symbol,
+                "news": filtered_news,
+                "sentiment": self._analyze_sentiment(filtered_news),
+                "key_events": self._extract_key_events(filtered_news),
+                "news_count": len(filtered_news),
+                "source": "cryptocurrency.cv",
+            }
+
+        except Exception as e:
+            logger.warning(f"[CryptoNews] Free Crypto News API failed: {e}")
+            return None
+
+    def _fetch_fear_greed_index(self) -> Optional[Dict[str, Any]]:
+        """
+        从 Alternative.me 获取恐惧贪婪指数（无需 API Key）
+
+        API 文档: https://alternative.me/crypto/api/
+        """
+        try:
+            url = f"{FEAR_GREED_URL}?limit=1"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("data"):
+                fg = data["data"][0]
+                return {
+                    "value": int(fg["value"]),
+                    "classification": fg["value_classification"],
+                    "timestamp": fg["timestamp"],
+                    "update_time": datetime.fromtimestamp(
+                        int(fg["timestamp"])
+                    ).strftime("%Y-%m-%d %H:%M"),
+                }
+
+        except Exception as e:
+            logger.warning(f"[CryptoNews] Fear & Greed API failed: {e}")
+            return None
+
+    def _fetch_rss_news(
+        self, symbol: str, name: str, limit: int = 5
+    ) -> Optional[Dict[str, Any]]:
+        """
+        从中文 RSS 新闻源获取新闻
+
+        支持：Odaily 星球日报、金色财经、巴比特、PANews、区块律动
+        """
+        all_news = []
+        symbol_upper = symbol.upper().replace("USDT", "").replace("USD", "")
+        keywords = self.CRYPTO_KEYWORDS.get(symbol_upper, [])
+        if name:
+            keywords.append(name.lower())
+
+        for source_id, source_info in CHINESE_RSS_SOURCES.items():
+            try:
+                news_items = self._parse_rss_feed(
+                    source_info["url"],
+                    source_info["name"],
+                    keywords,
+                    limit=2,  # 每个源最多取2条
+                )
+                all_news.extend(news_items)
+            except Exception as e:
+                logger.debug(
+                    f"[CryptoNews] RSS {source_info['name']} fetch failed: {e}"
+                )
+                continue
+
+        if not all_news:
+            return None
+
+        # 按时间排序，取最新的
+        all_news.sort(key=lambda x: x.get("time", ""), reverse=True)
+        all_news = all_news[:limit]
+
+        return {
+            "symbol": symbol,
+            "news": all_news,
+            "sentiment": self._analyze_sentiment(all_news),
+            "key_events": self._extract_key_events(all_news),
+            "news_count": len(all_news),
+            "source": "rss_chinese",
+        }
+
+    def _parse_rss_feed(
+        self, url: str, source_name: str, keywords: List[str], limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        解析 RSS 订阅源
+
+        Args:
+            url: RSS 订阅地址
+            source_name: 来源名称
+            keywords: 关键词过滤列表
+            limit: 返回数量限制
+
+        Returns:
+            新闻列表
+        """
+        news_items = []
+        try:
+            response = requests.get(
+                url, timeout=10, headers={"User-Agent": "Mozilla/5.0"}
+            )
+            response.raise_for_status()
+
+            root = ElementTree.fromstring(response.content)
+
+            # RSS 2.0 格式
+            for item in root.findall(".//item")[: limit * 3]:  # 多取一些用于过滤
+                title = item.find("title")
+                link = item.find("link")
+                pub_date = item.find("pubDate")
+                description = item.find("description")
+
+                if title is None:
+                    continue
+
+                title_text = title.text or ""
+                desc_text = description.text if description is not None else ""
+
+                # 关键词过滤
+                text = f"{title_text} {desc_text}".lower()
+                if keywords and not any(kw in text for kw in keywords):
+                    continue
+
+                news_items.append(
+                    {
+                        "title": title_text,
+                        "summary": desc_text[:500] if desc_text else "",
+                        "source": source_name,
+                        "time": pub_date.text if pub_date is not None else "",
+                        "url": link.text if link is not None else "",
+                        "sentiment": "neutral",
+                    }
+                )
+
+                if len(news_items) >= limit:
+                    break
+
+        except Exception as e:
+            logger.debug(f"[CryptoNews] RSS parse error for {source_name}: {e}")
+
+        return news_items
+
+    def _map_fear_greed_to_sentiment(self, value: int) -> str:
+        """
+        将恐惧贪婪指数映射为情绪
+
+        Args:
+            value: 0-100 的恐惧贪婪指数
+
+        Returns:
+            情绪字符串: positive/negative/neutral
+        """
+        if value <= 25:
+            return "negative"  # Extreme Fear - 可能是买入机会，但情绪负面
+        elif value <= 45:
+            return "negative"  # Fear
+        elif value <= 55:
+            return "neutral"
+        elif value <= 75:
+            return "positive"  # Greed
+        else:
+            return "positive"  # Extreme Greed
+
+    def _analyze_sentiment(self, news_items: List[Dict]) -> str:
+        """
+        简单情绪分析（基于关键词）
+
+        Args:
+            news_items: 新闻列表
+
+        Returns:
+            情绪字符串
+        """
+        positive_words = [
+            "bullish",
+            "surge",
+            "rally",
+            "gain",
+            "up",
+            "high",
+            "突破",
+            "上涨",
+            "利好",
+            "增持",
+            "adopt",
+            "approval",
+            "突破",
+            "创新高",
+        ]
+        negative_words = [
+            "bearish",
+            "crash",
+            "drop",
+            "fall",
+            "down",
+            "low",
+            "暴跌",
+            "下跌",
+            "利空",
+            "监管",
+            "ban",
+            "hack",
+            "暴跌",
+            "暴跌",
+        ]
+
+        positive_count = 0
+        negative_count = 0
+
+        for item in news_items:
+            title = item.get("title", "").lower()
+            summary = item.get("summary", "").lower()
+            text = f"{title} {summary}"
+
+            positive_count += sum(1 for w in positive_words if w in text)
+            negative_count += sum(1 for w in negative_words if w in text)
+
+        if positive_count > negative_count * 1.3:
+            return "positive"
+        elif negative_count > positive_count * 1.3:
+            return "negative"
+        return "neutral"
+
+    def fetch_fear_greed_index(self) -> Optional[Dict[str, Any]]:
+        """
+        公开方法：获取恐惧贪婪指数
+
+        Returns:
+            {
+                "value": 0-100,
+                "classification": "Extreme Fear/Fear/Neutral/Greed/Extreme Greed",
+                "timestamp": "...",
+                "update_time": "YYYY-MM-DD HH:MM"
+            }
+        """
+        return self._fetch_fear_greed_index()
+
+    def fetch_chinese_news(
+        self, symbol: str = "CRYPTO", limit: int = 10
+    ) -> Optional[Dict[str, Any]]:
+        """
+        公开方法：获取中文新闻
+
+        Args:
+            symbol: 币种代码（如 BTC, ETH）
+            limit: 获取数量
+
+        Returns:
+            新闻数据字典
+        """
+        return self._fetch_rss_news(symbol, "", limit)
 
     def fetch_market_news(self, limit: int = 10) -> Optional[Dict[str, Any]]:
         """
