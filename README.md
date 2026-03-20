@@ -14,7 +14,7 @@
   <a href="https://hellogithub.com/repository/ZhuLinsen/daily_stock_analysis" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=6daa16e405ce46ed97b4a57706aeb29f&claim_uid=pfiJMqhR9uvDGlT&theme=neutral" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 </p>
 
-> 🤖 基于 AI 大模型的 A股/港股/美股自选股智能分析系统，每日自动分析并推送「决策仪表盘」到企业微信/飞书/Telegram/Discord/邮箱
+> 🤖 基于 AI 大模型的 A股/港股/美股/加密货币自选股智能分析系统，每日自动分析并推送「决策仪表盘」到企业微信/飞书/Telegram/Discord/邮箱
 
 [**功能特性**](#-功能特性) · [**快速开始**](#-快速开始) · [**推送效果**](#-推送效果) · [**完整指南**](docs/full-guide.md) · [**常见问题**](docs/FAQ.md) · [**更新日志**](docs/CHANGELOG.md)
 
@@ -37,14 +37,16 @@
 |------|------|------|
 | AI | 决策仪表盘 | 一句话核心结论 + 精确买卖点位 + 操作检查清单 |
 | 分析 | 多维度分析 | 技术面（盘中实时 MA/多头排列）+ 筹码分布 + 舆情情报 + 实时行情 |
-| 市场 | 全球市场 | 支持 A股、港股、美股及美股指数（SPX、DJI、IXIC 等） |
+| 市场 | 全球市场 | 支持 A股、港股、美股及美股指数（SPX、DJI、IXIC 等）|
+| **加密货币** | **币圈分析** | **🆕 支持 BTC、ETH、SOL 等主流加密货币分析，MA7/MA25/MA99 专用均线系统，恐惧贪婪指数情绪参考** |
 | 基本面 | 结构化聚合 | 新增 `fundamental_context`（valuation/growth/earnings/institution/capital_flow/dragon_tiger/boards，其中 `earnings.data` 新增 `financial_report` 与 `dividend`，`boards` 表示板块涨跌榜），主链路 fail-open 降级 |
-| 策略 | 市场策略系统 | 内置 A股「三段式复盘策略」与美股「Regime Strategy」，输出进攻/均衡/防守或 risk-on/neutral/risk-off 计划，并附“仅供参考，不构成投资建议”提示 |
-| 复盘 | 大盘复盘 | 每日市场概览、板块涨跌；支持 cn(A股)/us(美股)/both(两者) 切换 |
+| 策略 | 市场策略系统 | 内置 A股「三段式复盘策略」与美股「Regime Strategy」，输出进攻/均衡/防守或 risk-on/neutral/risk-off 计划，并附"仅供参考，不构成投资建议"提示 |
+| **加密策略** | **币圈策略** | **🆕 5 种加密货币专用策略：多头趋势、市值占比、恐惧贪婪、Polymarket 情绪指标、事件驱动** |
+| 复盘 | 大盘复盘 | 每日市场概览、板块涨跌；支持 cn(A股)/us(美股)/both(两者)/crypto(加密货币) 切换 |
 | 智能导入 | 多源导入 | 支持图片、CSV/Excel 文件、剪贴板粘贴；Vision LLM 提取代码+名称；置信度分层确认；名称→代码解析（本地+拼音+AkShare） |
 | 历史记录 | 批量管理 | 支持多选、全选及批量删除历史分析记录，优化管理效率与 UI/UX 体验 |
 | 回测 | AI 回测验证 | 自动评估历史分析准确率，方向胜率、止盈止损命中率 |
-| **Agent 问股** | **策略对话** | **多轮策略问答，支持均线金叉/缠论/波浪等 11 种内置策略，Web/Bot/API 全链路** |
+| **Agent 问股** | **策略对话** | **多轮策略问答，支持均线金叉/缠论/波浪等 16 种内置策略（含 5 种加密货币策略），Web/Bot/API 全链路** |
 | 推送 | 多渠道通知 | 企业微信、飞书、Telegram、Discord、钉钉、邮件、Pushover |
 | 自动化 | 定时运行 | GitHub Actions 定时执行，无需服务器 |
 
@@ -61,10 +63,14 @@
 |------|------|
 | AI 模型 | [AIHubMix](https://aihubmix.com/?aff=CfMq)、Gemini、OpenAI 兼容、DeepSeek、通义千问、Claude 等（统一通过 [LiteLLM](https://github.com/BerriAI/litellm) 调用，支持多 Key 负载均衡）|
 | 行情数据 | [QVeris](https://qveris.ai)（主数据源，支持股票/加密货币）、AkShare、Tushare、Pytdx、Baostock、YFinance |
+| **加密货币数据** | **🆕 Hyperliquid（主源）、Bybit、Binance；实时行情、K线、深度数据** |
 | 新闻搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
+| **加密货币新闻** | **🆕 Free Crypto News API（200+ 源）、Alternative.me Fear & Greed Index、中文 RSS（Odaily/金色财经/巴比特/PANews/区块律动）** |
 | 社交舆情 | [Stock Sentiment API](https://api.adanos.org/docs)（Reddit / X / Polymarket，仅美股，可选） |
 
 > 注：美股历史数据与实时行情统一使用 YFinance，确保复权一致性
+> 
+> **加密货币数据源优先级**：Hyperliquid → Bybit → Binance（Hyperliquid 数据质量最高，延迟最低）
 
 ### 内置交易纪律
 
@@ -306,6 +312,43 @@ LITELLM_MODEL=openai/deepseek-chat
 领涨: 互联网服务、文化传媒、小金属
 领跌: 保险、航空机场、光伏设备
 ```
+
+### 🪙 加密货币分析（新功能）
+
+支持 BTC、ETH、SOL、BNB、XRP 等主流加密货币的智能分析：
+
+**使用方式**：
+```bash
+# 在 STOCK_LIST 中添加加密货币代码
+STOCK_LIST=BTCUSDT,ETHUSDT,SOLUSDT,600519,AAPL
+
+# 或使用 Agent 问股
+/ask 用多头趋势策略分析 BTC
+```
+
+**加密货币专用特性**：
+- **均线系统**：MA7/MA25/MA99（适配 24/7 交易特性）
+- **乖离率阈值**：放宽至 8%（股票为 5%）
+- **恐惧贪婪指数**：自动获取 Alternative.me 指数作为情绪参考
+- **新闻来源**：Free Crypto News API + 中文 RSS（Odaily、金色财经等）
+
+**内置加密货币策略**（5 种）：
+
+| 策略 | 说明 |
+|------|------|
+| `crypto_bull_trend` | 多头趋势策略，MA7/MA25/MA99 排列分析 |
+| `crypto_dominance` | 市值占比策略，BTC dominance 变化分析 |
+| `crypto_fear_greed` | 恐惧贪婪指数策略，极端情绪反向操作 |
+| `crypto_polymarket_sentiment` | Polymarket 情绪指标，预测市场概率分析 |
+| `crypto_event_driven` | 事件驱动策略，ETF 审批/美联储议息等事件博弈 |
+
+**加密货币大盘复盘**：
+```bash
+# 在 GitHub Actions 或命令行中设置
+MARKET_REVIEW_REGIONS=crypto  # 仅加密货币
+MARKET_REVIEW_REGIONS=both,crypto  # 股票 + 加密货币
+```
+
 ## ⚙️ 配置说明
 
 > 📖 完整环境变量、定时任务配置请参考 [完整配置指南](docs/full-guide.md)
@@ -348,8 +391,9 @@ LITELLM_MODEL=openai/deepseek-chat
 
 在 `.env` 中设置 `AGENT_MODE=true` 后启动服务，访问 `/chat` 页面即可开始多轮策略问答。
 
-- **选择策略**：均线金叉、缠论、波浪理论、多头趋势等 11 种内置策略
-- **自然语言提问**：如「用缠论分析 600519」，Agent 自动调用实时行情、K线、技术指标、新闻等工具
+- **选择策略**：均线金叉、缠论、波浪理论、多头趋势等 16 种内置策略（含 5 种加密货币专用策略）
+- **加密货币分析**：支持 `crypto_bull_trend`、`crypto_fear_greed`、`crypto_event_driven` 等策略分析 BTC/ETH/SOL
+- **自然语言提问**：如「用缠论分析 600519」或「用多头趋势分析 BTC」，Agent 自动调用实时行情、K线、技术指标、新闻等工具
 - **流式进度反馈**：实时展示 AI 思考路径（行情获取 → 技术分析 → 新闻搜索 → 生成结论）
 - **多轮对话**：支持追问上下文，会话历史持久化保存
 - **导出与发送**：可将会话导出为 .md 文件，或发送到已配置的通知渠道
