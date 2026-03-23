@@ -148,6 +148,9 @@ class StockAnalysisPipeline:
         计算公式：max_workers = ceil(股票数量 / max_stocks_per_worker)
         其中 max_stocks_per_worker 默认为 10
 
+        注意：动态并发模式下，max_workers 配置项仅作为硬上限（防止系统过载），
+        默认上限为 20。如果需要更严格控制，可设置 MAX_WORKERS 环境变量。
+
         Args:
             stock_count: 待分析的股票数量
 
@@ -161,9 +164,19 @@ class StockAnalysisPipeline:
         # 计算动态并发数
         dynamic_workers = math.ceil(stock_count / max_stocks_per_worker)
 
-        # 限制最大并发数（不超过配置的 max_workers 作为上限）
+        # 动态模式的硬上限（防止系统过载）
+        # 用户可通过 MAX_WORKERS 设置更严格的上限
         max_limit = self.config.max_workers
-        dynamic_workers = min(dynamic_workers, max_limit)
+        # 如果 max_workers 是默认值(3)，则使用更宽松的上限(20)供动态计算
+        # 如果用户显式设置了 MAX_WORKERS 且值较小，则尊重用户设置
+        if max_limit <= 3:
+            # 默认值或较小值，允许动态扩展到 20
+            hard_limit = 20
+        else:
+            # 用户显式设置了较大的值，使用该值作为上限
+            hard_limit = max_limit
+
+        dynamic_workers = min(dynamic_workers, hard_limit)
 
         # 至少为 1
         dynamic_workers = max(1, dynamic_workers)
@@ -171,7 +184,7 @@ class StockAnalysisPipeline:
         logger.info(
             f"[动态并发] 股票数: {stock_count}, "
             f"每并发最大股票数: {max_stocks_per_worker}, "
-            f"计算并发数: {dynamic_workers}"
+            f"计算并发数: {dynamic_workers}, 上限: {hard_limit}"
         )
 
         return dynamic_workers
