@@ -992,10 +992,35 @@ class DataFetcherManager:
                     if source.get("status") != "available"
                     and source.get("name") not in excluded_names
                 }
-                if self._unavailable_fetcher_names:
-                    logger.info(
-                        f"[DataSourcePool] 跳过不可用数据源: {self._unavailable_fetcher_names}"
-                    )
+
+            # 额外检查：数据源自身的可用性（Token/API Key 是否配置）
+            # 这是为了处理健康检测跳过的付费数据源（如 TushareFetcher is_free=False）
+            for fetcher in self._fetchers:
+                if fetcher.name in excluded_names:
+                    continue
+                if fetcher.name in available_names:
+                    continue
+                # 检查数据源是否自标记为不可用
+                if hasattr(fetcher, "_available") and not fetcher._available:
+                    self._unavailable_fetcher_names.add(fetcher.name)
+                    logger.debug(f"[DataSourcePool] {fetcher.name} 自标记为不可用")
+                # 检查 API 实例是否初始化（适用于 TushareFetcher 等）
+                elif hasattr(fetcher, "_api") and fetcher._api is None:
+                    self._unavailable_fetcher_names.add(fetcher.name)
+                    logger.debug(f"[DataSourcePool] {fetcher.name} API 未初始化")
+                # 检查是否缺少必要的 Token
+                elif hasattr(fetcher, "_token") and not fetcher._token:
+                    self._unavailable_fetcher_names.add(fetcher.name)
+                    logger.debug(f"[DataSourcePool] {fetcher.name} 未配置 Token")
+                # 检查是否缺少必要的 API Key
+                elif hasattr(fetcher, "_api_key") and not fetcher._api_key:
+                    self._unavailable_fetcher_names.add(fetcher.name)
+                    logger.debug(f"[DataSourcePool] {fetcher.name} 未配置 API Key")
+
+            if self._unavailable_fetcher_names:
+                logger.info(
+                    f"[DataSourcePool] 跳过不可用数据源: {self._unavailable_fetcher_names}"
+                )
 
             self._pool_initialized = True
 
