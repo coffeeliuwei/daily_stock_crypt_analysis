@@ -861,11 +861,13 @@ class DataFetcherManager:
         from .yfinance_fetcher import YfinanceFetcher
         from .crypto_fetcher import CryptoFetcher
         from .finshare_fetcher import FinshareFetcher
+        from .ashare_fetcher import AshareFetcher
 
         # 第一层：免费数据源（优先）
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
         finshare = FinshareFetcher()
+        ashare = AshareFetcher()
         crypto = CryptoFetcher()
         pytdx = PytdxFetcher()
 
@@ -881,6 +883,7 @@ class DataFetcherManager:
             efinance,  # Priority 0 (免费, 最优先)
             akshare,  # Priority 1 (免费)
             finshare,  # Priority 1 (免费, 多源聚合)
+            ashare,  # Priority 1 (免费, 腾讯API)
             crypto,  # Priority 1 (免费, 加密货币专用)
             pytdx,  # Priority 2 (免费)
             tushare,  # Priority 2 (收费)

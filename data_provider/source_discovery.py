@@ -176,6 +176,19 @@ KNOWN_SOURCES: List[Dict[str, Any]] = [
         "priority": 3,
     },
     {
+        "name": "AshareFetcher",
+        "package_name": "requests",  # 只需要 requests 库
+        "description": "Ashare 腾讯财经数据源",
+        "is_free": True,
+        "requires_api_key": False,
+        "supports_a_share": True,
+        "supports_hk": False,
+        "supports_us": False,
+        "import_path": "data_provider.ashare_fetcher",
+        "fetcher_class": "AshareFetcher",
+        "priority": 1,
+    },
+    {
         "name": "YfinanceFetcher",
         "package_name": "yfinance",
         "description": "Yahoo Finance 数据源（美股优先）",
