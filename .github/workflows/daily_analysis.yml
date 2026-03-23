@@ -31,8 +31,10 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    # 添加超时限制，防止任务卡死
-    timeout-minutes: 30
+    # 超时限制：82只股票 + 健康检测 + 报告生成，需要足够时间
+    # 健康检测：~60秒，每只股票：~15秒，3并发：82/3*15 ≈ 7分钟
+    # 加上 LLM 延迟、网络波动，设置 60 分钟较为安全
+    timeout-minutes: 60
     
     steps:
       - name: 随机延迟（避免固定时间访问）
