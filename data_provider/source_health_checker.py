@@ -128,6 +128,7 @@ class SourceHealthChecker:
 
         # 新增数据源（待实现检测）
         self.register_checker("FinshareFetcher", self._check_finshare)
+        self.register_checker("AshareFetcher", self._check_ashare)
         self.register_checker("AllTickFetcher", self._check_alltick)
         self.register_checker("FinnhubFetcher", self._check_finnhub)
         self.register_checker("ITickFetcher", self._check_itick)
@@ -656,6 +657,45 @@ class SourceHealthChecker:
             latency = (time.time() - start_time) * 1000
             return HealthCheckResult(
                 name="FinshareFetcher",
+                status=SourceStatus.ERROR,
+                available=False,
+                latency_ms=latency,
+                error_message=str(e)[:200],
+            )
+
+    def _check_ashare(self) -> HealthCheckResult:
+        """检测 Ashare 数据源（腾讯财经 API）"""
+        start_time = time.time()
+        try:
+            from .ashare_fetcher import AshareFetcher
+
+            fetcher = AshareFetcher()
+
+            # 尝试获取测试股票数据
+            df = fetcher.get_daily_data(stock_code=self.config.test_stock_code, days=5)
+
+            latency = (time.time() - start_time) * 1000
+
+            if df is not None and not df.empty:
+                return HealthCheckResult(
+                    name="AshareFetcher",
+                    status=SourceStatus.AVAILABLE,
+                    available=True,
+                    latency_ms=latency,
+                    details={"rows": len(df)},
+                )
+            else:
+                return HealthCheckResult(
+                    name="AshareFetcher",
+                    status=SourceStatus.UNAVAILABLE,
+                    available=False,
+                    latency_ms=latency,
+                    error_message="返回数据为空",
+                )
+        except Exception as e:
+            latency = (time.time() - start_time) * 1000
+            return HealthCheckResult(
+                name="AshareFetcher",
                 status=SourceStatus.ERROR,
                 available=False,
                 latency_ms=latency,
