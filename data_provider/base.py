@@ -913,6 +913,8 @@ class DataFetcherManager:
         - SOURCE_SELECTION_MODE: 选择模式 (random/priority/round_robin)
         - SOURCE_FAILURE_THRESHOLD: 连续失败次数触发冷却
         - SOURCE_COOLDOWN_SECONDS: 冷却时间（秒）
+
+        同时使用启动时健康检测结果，只包含可用的数据源
         """
         if not self._use_pool or self._pool_initialized:
             return
@@ -939,13 +941,35 @@ class DataFetcherManager:
                 health_recovery=0.05,
             )
 
-            # 过滤掉加密货币专用数据源（CryptoFetcher）和美股专用数据源（YfinanceFetcher）
-            # 这些有专门的路由逻辑，不参与普通股票的池化
-            stock_fetchers = [
-                f
-                for f in self._fetchers
-                if f.name not in ("CryptoFetcher", "YfinanceFetcher")
-            ]
+            # 排除的专用数据源（有专门的路由逻辑，不参与普通股票的池化）
+            excluded_names = {"CryptoFetcher", "YfinanceFetcher"}
+
+            # 从健康检测报告获取可用数据源名称
+            health_report = getattr(config, "_source_health_report", None)
+            available_names = set()
+
+            if health_report and "sources" in health_report:
+                for source in health_report["sources"]:
+                    name = source.get("name", "")
+                    status = source.get("status", "")
+                    if status == "available" and name not in excluded_names:
+                        available_names.add(name)
+
+                logger.info(
+                    f"[DataSourcePool] 健康检测报告: 可用数据源 {available_names}"
+                )
+
+            # 过滤数据源：只保留可用的
+            if available_names:
+                stock_fetchers = [
+                    f for f in self._fetchers if f.name in available_names
+                ]
+            else:
+                # 回退：没有健康报告时，使用所有非专用数据源
+                stock_fetchers = [
+                    f for f in self._fetchers if f.name not in excluded_names
+                ]
+                logger.warning("[DataSourcePool] 无健康检测报告，使用所有非专用数据源")
 
             if stock_fetchers:
                 self._source_pool = DataSourcePool(stock_fetchers, pool_config)
@@ -953,6 +977,11 @@ class DataFetcherManager:
                     f"[DataSourcePool] 初始化完成，包含 {len(stock_fetchers)} 个股票数据源: "
                     f"{[f.name for f in stock_fetchers]}, 模式: {selection_mode.value}"
                 )
+            else:
+                logger.warning(
+                    "[DataSourcePool] 无可用数据源，池初始化失败，将使用原有逻辑"
+                )
+                self._source_pool = None
 
             self._pool_initialized = True
 
