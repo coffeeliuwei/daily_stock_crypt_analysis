@@ -143,13 +143,14 @@ class StockAnalysisPipeline:
 
     def _calculate_dynamic_workers(self, stock_count: int) -> int:
         """
-        根据股票数量动态计算最大并发数
+        根据股票数量和可用数据源数量动态计算最大并发数
 
         计算公式：max_workers = ceil(股票数量 / max_stocks_per_worker)
         其中 max_stocks_per_worker 默认为 10
 
-        注意：动态并发模式下，max_workers 配置项仅作为硬上限（防止系统过载），
-        默认上限为 20。如果需要更严格控制，可设置 MAX_WORKERS 环境变量。
+        约束条件：
+        1. 并发数不超过可用数据源数量（避免线程等待数据源锁）
+        2. 并发数不超过硬上限（防止系统过载）
 
         Args:
             stock_count: 待分析的股票数量
@@ -164,16 +165,17 @@ class StockAnalysisPipeline:
         # 计算动态并发数
         dynamic_workers = math.ceil(stock_count / max_stocks_per_worker)
 
+        # 获取数据源池中的可用数据源数量
+        pool_size = self._get_available_pool_size()
+        if pool_size > 0:
+            # 并发数不超过数据源数量，避免线程等待锁
+            dynamic_workers = min(dynamic_workers, pool_size)
+
         # 动态模式的硬上限（防止系统过载）
-        # 用户可通过 MAX_WORKERS 设置更严格的上限
         max_limit = self.config.max_workers
-        # 如果 max_workers 是默认值(3)，则使用更宽松的上限(20)供动态计算
-        # 如果用户显式设置了 MAX_WORKERS 且值较小，则尊重用户设置
         if max_limit <= 3:
-            # 默认值或较小值，允许动态扩展到 20
             hard_limit = 20
         else:
-            # 用户显式设置了较大的值，使用该值作为上限
             hard_limit = max_limit
 
         dynamic_workers = min(dynamic_workers, hard_limit)
@@ -184,10 +186,49 @@ class StockAnalysisPipeline:
         logger.info(
             f"[动态并发] 股票数: {stock_count}, "
             f"每并发最大股票数: {max_stocks_per_worker}, "
+            f"数据源池大小: {pool_size}, "
             f"计算并发数: {dynamic_workers}, 上限: {hard_limit}"
         )
 
         return dynamic_workers
+
+    def _get_available_pool_size(self) -> int:
+        """
+        获取数据源池中可用于股票分析的数据源数量
+
+        排除：CryptoFetcher（加密货币专用）、YfinanceFetcher（美股专用）
+
+        Returns:
+            可用数据源数量
+        """
+        try:
+            # 获取所有数据源
+            all_fetchers = getattr(self.fetcher_manager, "_fetchers", [])
+
+            # 过滤掉专用数据源，只保留可用于普通股票的数据源
+            stock_fetchers = [
+                f
+                for f in all_fetchers
+                if f.name not in ("CryptoFetcher", "YfinanceFetcher")
+            ]
+
+            # 进一步过滤：只保留健康可用的数据源
+            # 检查数据源池的健康报告
+            health_report = self.fetcher_manager.get_pool_health_report()
+            if health_report:
+                available = [
+                    name
+                    for name, info in health_report.items()
+                    if not info.get("in_cooldown", False)
+                    and info.get("health_score", 1.0) > 0.1
+                ]
+                return len(available)
+
+            return len(stock_fetchers)
+
+        except Exception as e:
+            logger.warning(f"[动态并发] 获取数据源池大小失败: {e}")
+            return 3  # 默认返回 3 作为保守估计
 
     def fetch_and_save_stock_data(
         self, code: str, force_refresh: bool = False
