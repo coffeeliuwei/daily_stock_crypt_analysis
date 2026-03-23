@@ -649,6 +649,7 @@ class DataFetcherManager:
         self._use_pool = use_pool
         self._source_pool: Optional[DataSourcePool] = None
         self._pool_initialized = False  # Must be set before _init_default_fetchers()
+        self._unavailable_fetcher_names: set = set()  # 健康检测不可用的数据源名称
 
         if fetchers:
             # 按优先级排序
@@ -983,6 +984,19 @@ class DataFetcherManager:
                 )
                 self._source_pool = None
 
+            # 记录不可用的数据源名称（用于跳过遍历）
+            if health_report and "sources" in health_report:
+                self._unavailable_fetcher_names = {
+                    source.get("name")
+                    for source in health_report["sources"]
+                    if source.get("status") != "available"
+                    and source.get("name") not in excluded_names
+                }
+                if self._unavailable_fetcher_names:
+                    logger.info(
+                        f"[DataSourcePool] 跳过不可用数据源: {self._unavailable_fetcher_names}"
+                    )
+
             self._pool_initialized = True
 
         except Exception as e:
@@ -1157,10 +1171,14 @@ class DataFetcherManager:
             )
 
         # === 原有逻辑：按优先级遍历（回退方案）===
-        for attempt, fetcher in enumerate(self._fetchers, start=1):
+        # 过滤掉不可用的数据源
+        available_fetchers = [
+            f for f in self._fetchers if f.name not in self._unavailable_fetcher_names
+        ]
+        for attempt, fetcher in enumerate(available_fetchers, start=1):
             try:
                 logger.info(
-                    f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] 获取 {stock_code}..."
+                    f"[数据源尝试 {attempt}/{len(available_fetchers)}] [{fetcher.name}] 获取 {stock_code}..."
                 )
                 df = fetcher.get_daily_data(
                     stock_code=stock_code,
@@ -1181,12 +1199,12 @@ class DataFetcherManager:
                 error_type, error_reason = summarize_exception(e)
                 error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
                 logger.warning(
-                    f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
+                    f"[数据源失败 {attempt}/{len(available_fetchers)}] [{fetcher.name}] {stock_code}: "
                     f"error_type={error_type}, reason={error_reason}"
                 )
                 errors.append(error_msg)
-                if attempt < total_fetchers:
-                    next_fetcher = self._fetchers[attempt]
+                if attempt < len(available_fetchers):
+                    next_fetcher = available_fetchers[attempt]
                     logger.info(
                         f"[数据源切换] {stock_code}: [{fetcher.name}] -> [{next_fetcher.name}]"
                     )
@@ -1752,8 +1770,11 @@ class DataFetcherManager:
             self._stock_name_cache[stock_code] = static_name
             return static_name
 
-        # 3. 依次尝试各个数据源
+        # 3. 依次尝试各个数据源（跳过不可用的）
         for fetcher in self._fetchers:
+            # 跳过健康检测不可用的数据源
+            if fetcher.name in self._unavailable_fetcher_names:
+                continue
             if hasattr(fetcher, "get_stock_name"):
                 try:
                     name = fetcher.get_stock_name(stock_code)
