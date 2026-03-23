@@ -69,10 +69,9 @@ class StockAnalysisPipeline:
 
         Args:
             config: 配置对象（可选，默认使用全局配置）
-            max_workers: 最大并发线程数（可选，默认从配置读取）
+            max_workers: 最大并发线程数（可选，默认从配置读取或动态计算）
         """
         self.config = config or get_config()
-        self.max_workers = max_workers or self.config.max_workers
         self.source_message = source_message
         self.query_id = query_id
         self.query_source = self._resolve_query_source(query_source)
@@ -81,6 +80,15 @@ class StockAnalysisPipeline:
             if save_context_snapshot is None
             else save_context_snapshot
         )
+
+        # 动态并发计算：如果未显式指定 max_workers，则根据配置计算
+        # max_workers 的最终值将在首次批量分析时根据股票数量动态确定
+        if max_workers is not None:
+            self.max_workers = max_workers
+            self._use_dynamic_workers = False
+        else:
+            self.max_workers = self.config.max_workers
+            self._use_dynamic_workers = True
 
         # 初始化各模块
         self.db = get_db()
@@ -103,7 +111,9 @@ class StockAnalysisPipeline:
             ),
         )
 
-        logger.info(f"调度器初始化完成，最大并发数: {self.max_workers}")
+        logger.info(
+            f"调度器初始化完成，最大并发数: {self.max_workers}{' (动态计算)' if self._use_dynamic_workers else ''}"
+        )
         logger.info("已启用趋势分析器 (MA5>MA10>MA20 多头判断)")
         # 打印实时行情/筹码配置状态
         if self.config.enable_realtime_quote:
@@ -130,6 +140,41 @@ class StockAnalysisPipeline:
             logger.info(
                 "Social sentiment service enabled (Reddit/X/Polymarket, US stocks only)"
             )
+
+    def _calculate_dynamic_workers(self, stock_count: int) -> int:
+        """
+        根据股票数量动态计算最大并发数
+
+        计算公式：max_workers = ceil(股票数量 / max_stocks_per_worker)
+        其中 max_stocks_per_worker 默认为 10
+
+        Args:
+            stock_count: 待分析的股票数量
+
+        Returns:
+            计算后的最大并发数
+        """
+        import math
+
+        max_stocks_per_worker = getattr(self.config, "max_stocks_per_worker", 10)
+
+        # 计算动态并发数
+        dynamic_workers = math.ceil(stock_count / max_stocks_per_worker)
+
+        # 限制最大并发数（不超过配置的 max_workers 作为上限）
+        max_limit = self.config.max_workers
+        dynamic_workers = min(dynamic_workers, max_limit)
+
+        # 至少为 1
+        dynamic_workers = max(1, dynamic_workers)
+
+        logger.info(
+            f"[动态并发] 股票数: {stock_count}, "
+            f"每并发最大股票数: {max_stocks_per_worker}, "
+            f"计算并发数: {dynamic_workers}"
+        )
+
+        return dynamic_workers
 
     def fetch_and_save_stock_data(
         self, code: str, force_refresh: bool = False
@@ -1441,10 +1486,16 @@ class StockAnalysisPipeline:
             logger.error("未配置自选股列表，请在 .env 文件中设置 STOCK_LIST")
             return []
 
+        # 动态计算并发数（根据股票数量）
+        if self._use_dynamic_workers:
+            effective_workers = self._calculate_dynamic_workers(len(stock_codes))
+        else:
+            effective_workers = self.max_workers
+
         logger.info(f"===== 开始分析 {len(stock_codes)} 只股票 =====")
         logger.info(f"股票列表: {', '.join(stock_codes)}")
         logger.info(
-            f"并发数: {self.max_workers}, 模式: {'仅获取数据' if dry_run else '完整分析'}"
+            f"并发数: {effective_workers}, 模式: {'仅获取数据' if dry_run else '完整分析'}"
         )
 
         # === 批量预取实时行情（优化：避免每只股票都触发全量拉取）===
@@ -1482,8 +1533,8 @@ class StockAnalysisPipeline:
         results: List[AnalysisResult] = []
 
         # 使用线程池并发处理
-        # 注意：max_workers 设置较低（默认3）以避免触发反爬
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        # 注意：effective_workers 根据股票数量动态计算，避免过度并发
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
             # 提交任务
             future_to_code = {
                 executor.submit(

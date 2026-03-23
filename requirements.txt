@@ -14,15 +14,20 @@ exchange-calendars>=4.5.0   # 交易日历（A股/港股/美股，Issue #373）
 httpx>=0.27.0               # Priority 0: QVeris API 客户端
 
 # 第二层：免费数据源
-efinance>=0.5.5             # Priority 1: 东方财富数据源
+efinance>=0.5.5             # Priority 0: 东方财富数据源
 akshare>=1.12.0             # Priority 1: 东方财富爬虫数据源
+finshare>=1.1.0             # Priority 1: 多源聚合数据源（东财/腾讯/新浪/通达信/Baostock）
 ccxt>=4.0.0                 # Priority 1: 加密货币数据源（Binance等）
 pytdx>=1.72                 # Priority 2: 通达信行情服务器
 
 # 第三层：收费/兜底数据源
-tushare>=1.4.0              # Priority 3: 挖地兔 Pro API
+tushare>=1.4.0              # Priority 2: 挖地兔 Pro API
 baostock>=0.8.0             # Priority 3: 证券宝数据
 yfinance>=0.2.0             # Priority 4: Yahoo Finance (Fallback)
+
+# 可选数据源（需配置 API Key）
+# finnhub-python>=2.4.0     # Finnhub 美股数据源（60次/分钟免费）
+# alltick                   # AllTick 全球市场数据
 
 #飞书
 lark-oapi>=1.0.0             # 飞书API

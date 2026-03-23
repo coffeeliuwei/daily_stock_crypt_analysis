@@ -49,6 +49,7 @@
 | **Agent 问股** | **策略对话** | **多轮策略问答，支持均线金叉/缠论/波浪等 16 种内置策略（含 5 种加密货币策略），Web/Bot/API 全链路** |
 | 推送 | 多渠道通知 | 企业微信、飞书、Telegram、Discord、钉钉、邮件、Pushover |
 | 自动化 | 定时运行 | GitHub Actions 定时执行，无需服务器 |
+| **性能优化** | **池化架构** | **🆕 数据源池（随机选择+互斥访问+健康追踪）+ 模型池（多模型负载均衡）+ 动态并发（根据股票数量自动调整并发数）** |
 
 > 历史报告详情会优先展示 AI 返回的原始「狙击点位」文本，避免区间价、条件说明等复杂内容在历史回看时被压缩成单个数字。
 
@@ -57,12 +58,15 @@
 
 > 持仓管理补充说明：卖出录入现在会在写入前校验可用持仓，超售会直接拒绝；如果历史里误录了交易 / 资金流水 / 公司行为，可在 Web `/portfolio` 页的事件列表中直接删除后恢复快照。
 
+> **池化架构说明**：股票数据获取支持多数据源池化管理，随机选择避免单一数据源过载；LLM 支持配置多个模型（如 `OPENAI_MODEL=qwen-turbo,qwen-plus,qwen-max`），随机选择实现负载均衡；并发数根据股票数量动态计算（默认每并发处理 10 只股票），82 只股票自动扩展到 9 个并发。
+
 ### 技术栈与数据来源
 
 | 类型 | 支持 |
 |------|------|
 | AI 模型 | [AIHubMix](https://aihubmix.com/?aff=CfMq)、Gemini、OpenAI 兼容、DeepSeek、通义千问、Claude 等（统一通过 [LiteLLM](https://github.com/BerriAI/litellm) 调用，支持多 Key 负载均衡）|
-| 行情数据 | [QVeris](https://qveris.ai)（主数据源，支持股票/加密货币）、AkShare、Tushare、Pytdx、Baostock、YFinance |
+| 行情数据 | [QVeris](https://qveris.ai)（主数据源）、**🆕 Finshare（多源聚合）**、AkShare、Tushare、Pytdx、Baostock、YFinance |
+| **数据源池** | **🆕 9 个数据源池化管理，启动时自动检测健康状态，随机选择+互斥访问+自动降级** |
 | **加密货币数据** | **🆕 Hyperliquid（主源）、Bybit、Binance；实时行情、K线、深度数据** |
 | 新闻搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
 | **加密货币新闻** | **🆕 Free Crypto News API（200+ 源）、Alternative.me Fear & Greed Index、中文 RSS（Odaily/金色财经/巴比特/PANews/区块律动）** |

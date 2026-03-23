@@ -33,6 +33,12 @@ from src.config import (
 from src.storage import persist_llm_usage
 from src.data.stock_mapping import STOCK_NAME_MAP
 from src.schemas.report_schema import AnalysisReportSchema
+from src.llm_model_pool import (
+    LLMModelPool,
+    ModelPoolConfig,
+    ModelSelectionMode,
+    create_model_pool_from_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -878,6 +884,7 @@ class GeminiAnalyzer:
         """
         self._router = None
         self._litellm_available = False
+        self._model_pool: Optional[LLMModelPool] = None
         self._init_litellm()
         if not self._litellm_available:
             logger.warning(
@@ -900,6 +907,24 @@ class GeminiAnalyzer:
             return
 
         self._litellm_available = True
+
+        # --- Model Pool path: for OpenAI-compatible APIs with multiple models ---
+        # 优先检查模型池配置（OPENAI_MODEL 包含逗号分隔的多个模型）
+        if len(config.openai_model_pool) > 1:
+            try:
+                self._model_pool = create_model_pool_from_config()
+                if self._model_pool:
+                    logger.info(
+                        f"Analyzer LLM: Model pool initialized with "
+                        f"{len(config.openai_model_pool)} models: {config.openai_model_pool}"
+                    )
+                    return  # 模型池初始化成功，跳过其他初始化
+            except Exception as e:
+                logger.warning(
+                    f"Analyzer LLM: Failed to initialize model pool: {e}, "
+                    f"falling back to legacy mode"
+                )
+                self._model_pool = None
 
         # --- Channel / YAML path: build Router from pre-built model_list ---
         if self._has_channel_config(config):
@@ -981,6 +1006,27 @@ class GeminiAnalyzer:
             or 8192
         )
         temperature = generation_config.get("temperature", 0.7)
+
+        # --- Model Pool path: 使用模型池调用 ---
+        if self._model_pool:
+            try:
+                messages = [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
+                response_text, model_used, usage = self._model_pool.call(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                persist_llm_usage(usage, model_used, call_type="stock_analysis")
+                return response_text, model_used, usage
+            except Exception as e:
+                logger.warning(
+                    f"[LiteLLM] Model pool call failed: {e}, "
+                    f"falling back to legacy mode"
+                )
+                # 继续执行原有逻辑
 
         models_to_try = [config.litellm_model] + (config.litellm_fallback_models or [])
         models_to_try = [m for m in models_to_try if m]

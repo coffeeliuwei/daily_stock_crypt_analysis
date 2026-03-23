@@ -9,9 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 新功能
+
+- 🔄 **数据源池化架构** — 股票数据获取支持多数据源池化管理，随机选择数据源避免单一数据源过载，互斥访问防止并发冲突，健康状态追踪自动降级失败数据源。
+- 🤖 **LLM 模型池** — 支持在 `OPENAI_MODEL` 中配置多个模型（逗号分隔），共用同一 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`，随机选择模型实现负载均衡。适用于阿里云百炼等 OpenAI 兼容平台。
+- ⚡ **动态并发计算** — 根据股票数量自动计算最优并发数，公式：`并发数 = ceil(股票数量 / MAX_STOCKS_PER_WORKER)`。默认每并发处理 10 只股票，82 只股票自动扩展到 9 个并发。
+- 🩺 **数据源健康检测** — 启动时自动检测所有数据源是否可用，记录响应时间和成功率，自动排除不可用的数据源。
+- 🔍 **动态数据源发现** — 支持启动时自动搜索网络中的免费数据源，检测可用性后自动加入数据源池。
+- 📦 **新增 FinshareFetcher** — 集成 Finshare 多源聚合数据源（东财/腾讯/新浪/通达信/Baostock），支持 A 股、港股、美股。
+
+### 变更
+
+- 新增配置项 `MAX_STOCKS_PER_WORKER`：每个并发最大处理股票数（默认 10）
+- 新增配置项 `SOURCE_SELECTION_MODE`：数据源选择模式（random/priority/round_robin，默认 random）
+- 新增配置项 `SOURCE_FAILURE_THRESHOLD`：连续失败次数触发冷却（默认 3）
+- 新增配置项 `SOURCE_COOLDOWN_SECONDS`：数据源冷却时间（默认 300 秒）
+- 新增配置项 `MODEL_SELECTION_MODE`：模型选择模式（random/sequential/least_latency，默认 random）
+- `OPENAI_MODEL` 支持逗号分隔多个模型，如 `qwen-turbo,qwen-plus,qwen-max`
+- 数据源列表新增 `FinshareFetcher`（Priority 1），共 9 个数据源
+
 ### 说明
 
-- 暂无。
+- 加密货币分析保持原有逻辑，暂未纳入数据源池化范围
+- 数据源池排除 `CryptoFetcher` 和 `YfinanceFetcher`，它们有专门的路由逻辑
+- 启动时会自动检测数据源健康状态，日志中显示可用数据源列表
 
 ## [3.8.0] - 2026-03-17
 

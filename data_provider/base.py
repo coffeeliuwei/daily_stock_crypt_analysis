@@ -38,6 +38,13 @@ from .utils import (
     _is_hk_market,
 )
 from .base_fetcher import BaseFetcher as BaseFetcherFromModule
+from .source_pool import (
+    DataSourcePool,
+    SourcePoolConfig,
+    SourceSelectionMode,
+    get_source_pool,
+    reset_source_pool,
+)
 
 if TYPE_CHECKING:
     from .realtime_types import ChipDistribution, UnifiedRealtimeQuote
@@ -628,14 +635,19 @@ class DataFetcherManager:
     - 所有数据源都失败时抛出异常
     """
 
-    def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
+    def __init__(
+        self, fetchers: Optional[List[BaseFetcher]] = None, use_pool: bool = True
+    ):
         """
         初始化管理器
 
         Args:
             fetchers: 数据源列表（可选，默认按优先级自动创建）
+            use_pool: 是否使用数据源池（默认 True，启用随机选择和互斥访问）
         """
         self._fetchers: List[BaseFetcher] = []
+        self._use_pool = use_pool
+        self._source_pool: Optional[DataSourcePool] = None
 
         if fetchers:
             # 按优先级排序
@@ -650,6 +662,9 @@ class DataFetcherManager:
         self._fundamental_timeout_slots = BoundedSemaphore(
             self._fundamental_timeout_worker_limit
         )
+
+        # 初始化数据源池（延迟初始化，首次使用时创建）
+        self._pool_initialized = False
 
     def _get_fundamental_cache_key(
         self, stock_code: str, budget_seconds: Optional[float] = None
@@ -825,13 +840,14 @@ class DataFetcherManager:
           - QVerisFetcher (Priority 0) - 主数据源，统一 API 网关
 
         【第二层：免费数据源 - Priority 1-2】
-          - EfinanceFetcher (Priority 1) - 东方财富
+          - EfinanceFetcher (Priority 0) - 东方财富
           - AkshareFetcher (Priority 1) - Akshare
+          - FinshareFetcher (Priority 1) - Finshare（多源聚合）
           - CryptoFetcher (Priority 1) - 加密货币
           - PytdxFetcher (Priority 2) - 通达信
 
         【第三层：收费/兜底数据源 - Priority 3-4】
-          - TushareFetcher (Priority 3) - Tushare Pro（需 Token）
+          - TushareFetcher (Priority 2) - Tushare Pro（需 Token）
           - BaostockFetcher (Priority 3) - Baostock
           - YfinanceFetcher (Priority 4) - Yahoo Finance
 
@@ -845,10 +861,12 @@ class DataFetcherManager:
         from .baostock_fetcher import BaostockFetcher
         from .yfinance_fetcher import YfinanceFetcher
         from .crypto_fetcher import CryptoFetcher
+        from .finshare_fetcher import FinshareFetcher
 
         # 第一层：免费数据源（优先）
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
+        finshare = FinshareFetcher()
         crypto = CryptoFetcher()
         pytdx = PytdxFetcher()
 
@@ -863,6 +881,7 @@ class DataFetcherManager:
         self._fetchers = [
             efinance,  # Priority 0 (免费, 最优先)
             akshare,  # Priority 1 (免费)
+            finshare,  # Priority 1 (免费, 多源聚合)
             crypto,  # Priority 1 (免费, 加密货币专用)
             pytdx,  # Priority 2 (免费)
             tushare,  # Priority 2 (收费)
@@ -880,10 +899,74 @@ class DataFetcherManager:
             f"已初始化 {len(self._fetchers)} 个数据源（按优先级）: {priority_info}"
         )
 
+        # 初始化数据源池
+        self._init_source_pool()
+
     def add_fetcher(self, fetcher: BaseFetcher) -> None:
         """添加数据源并重新排序"""
         self._fetchers.append(fetcher)
         self._fetchers.sort(key=lambda f: f.priority)
+
+    def _init_source_pool(self) -> None:
+        """
+        初始化数据源池
+
+        从配置读取：
+        - SOURCE_SELECTION_MODE: 选择模式 (random/priority/round_robin)
+        - SOURCE_FAILURE_THRESHOLD: 连续失败次数触发冷却
+        - SOURCE_COOLDOWN_SECONDS: 冷却时间（秒）
+        """
+        if not self._use_pool or self._pool_initialized:
+            return
+
+        try:
+            from src.config import get_config
+
+            config = get_config()
+
+            # 读取配置
+            mode_str = getattr(config, "source_selection_mode", "random").lower()
+            mode_map = {
+                "random": SourceSelectionMode.RANDOM,
+                "round_robin": SourceSelectionMode.ROUND_ROBIN,
+                "priority": SourceSelectionMode.PRIORITY,
+            }
+            selection_mode = mode_map.get(mode_str, SourceSelectionMode.RANDOM)
+
+            pool_config = SourcePoolConfig(
+                selection_mode=selection_mode,
+                failure_threshold=getattr(config, "source_failure_threshold", 3),
+                cooldown_seconds=getattr(config, "source_cooldown_seconds", 300),
+                health_decay=0.15,
+                health_recovery=0.05,
+            )
+
+            # 过滤掉加密货币专用数据源（CryptoFetcher）和美股专用数据源（YfinanceFetcher）
+            # 这些有专门的路由逻辑，不参与普通股票的池化
+            stock_fetchers = [
+                f
+                for f in self._fetchers
+                if f.name not in ("CryptoFetcher", "YfinanceFetcher")
+            ]
+
+            if stock_fetchers:
+                self._source_pool = DataSourcePool(stock_fetchers, pool_config)
+                logger.info(
+                    f"[DataSourcePool] 初始化完成，包含 {len(stock_fetchers)} 个股票数据源: "
+                    f"{[f.name for f in stock_fetchers]}, 模式: {selection_mode.value}"
+                )
+
+            self._pool_initialized = True
+
+        except Exception as e:
+            logger.warning(f"[DataSourcePool] 初始化失败，将使用原有逻辑: {e}")
+            self._source_pool = None
+
+    def get_pool_health_report(self) -> Optional[Dict[str, Any]]:
+        """获取数据源池健康状态报告"""
+        if self._source_pool:
+            return self._source_pool.get_health_report()
+        return None
 
     def get_daily_data(
         self,
@@ -1039,6 +1122,14 @@ class DataFetcherManager:
             )
             raise DataFetchError(error_summary)
 
+        # === 股票数据获取：使用数据源池（随机选择 + 互斥访问）===
+        # 如果数据源池可用，使用池化逻辑；否则回退到原有遍历逻辑
+        if self._source_pool and self._use_pool:
+            return self._get_daily_data_with_pool(
+                stock_code, start_date, end_date, days, request_start
+            )
+
+        # === 原有逻辑：按优先级遍历（回退方案）===
         for attempt, fetcher in enumerate(self._fetchers, start=1):
             try:
                 logger.info(
@@ -1074,6 +1165,99 @@ class DataFetcherManager:
                     )
                 # 继续尝试下一个数据源
                 continue
+
+        # 所有数据源都失败
+        error_summary = f"所有数据源获取 {stock_code} 失败:\n" + "\n".join(errors)
+        elapsed = time.time() - request_start
+        logger.error(
+            f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}"
+        )
+        raise DataFetchError(error_summary)
+
+    def _get_daily_data_with_pool(
+        self,
+        stock_code: str,
+        start_date: Optional[str],
+        end_date: Optional[str],
+        days: int,
+        request_start: float,
+    ) -> Tuple[pd.DataFrame, str]:
+        """
+        使用数据源池获取日线数据
+
+        特点：
+        1. 随机选择数据源（避免单一数据源过载）
+        2. 互斥访问（同一时间同一数据源只有一个请求）
+        3. 健康状态追踪（自动降级失败的数据源）
+
+        Args:
+            stock_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            days: 获取天数
+            request_start: 请求开始时间
+
+        Returns:
+            Tuple[DataFrame, str]: (数据, 成功的数据源名称)
+        """
+        errors = []
+        tried_fetchers = set()
+        max_attempts = len(self._fetchers)  # 最多尝试所有数据源
+
+        while len(tried_fetchers) < max_attempts:
+            # 从数据源池获取一个可用的数据源
+            result = self._source_pool.acquire_fetcher(
+                exclude_names=list(tried_fetchers)
+            )
+
+            if result is None:
+                # 所有数据源都不可用
+                logger.warning(
+                    f"[DataSourcePool] {stock_code}: 所有数据源都不可用或正在使用"
+                )
+                break
+
+            fetcher, lock = result
+            tried_fetchers.add(fetcher.name)
+            fetch_start = time.time()
+
+            try:
+                logger.info(
+                    f"[数据源池] {stock_code} 使用 [{fetcher.name}] 获取数据..."
+                )
+                df = fetcher.get_daily_data(
+                    stock_code=stock_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                    days=days,
+                )
+
+                if df is not None and not df.empty:
+                    latency = time.time() - fetch_start
+                    elapsed = time.time() - request_start
+                    logger.info(
+                        f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                        f"rows={len(df)}, latency={latency:.2f}s, elapsed={elapsed:.2f}s"
+                    )
+                    # 释放数据源（成功）
+                    self._source_pool.release_fetcher(
+                        fetcher.name, success=True, latency=latency
+                    )
+                    return df, fetcher.name
+
+            except Exception as e:
+                latency = time.time() - fetch_start
+                error_type, error_reason = summarize_exception(e)
+                error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
+                logger.warning(
+                    f"[数据源失败] [{fetcher.name}] {stock_code}: "
+                    f"error_type={error_type}, reason={error_reason}"
+                )
+                errors.append(error_msg)
+                # 释放数据源（失败）
+                self._source_pool.release_fetcher(
+                    fetcher.name, success=False, latency=latency
+                )
 
         # 所有数据源都失败
         error_summary = f"所有数据源获取 {stock_code} 失败:\n" + "\n".join(errors)

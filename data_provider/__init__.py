@@ -42,11 +42,26 @@ from .pytdx_fetcher import PytdxFetcher
 from .baostock_fetcher import BaostockFetcher
 from .yfinance_fetcher import YfinanceFetcher
 from .crypto_fetcher import CryptoFetcher
+from .finshare_fetcher import FinshareFetcher
 from .us_index_mapping import (
     is_us_index_code,
     is_us_stock_code,
     get_us_index_yf_symbol,
     US_INDEX_MAPPING,
+)
+from .source_health_checker import (
+    SourceHealthChecker,
+    HealthCheckResult,
+    HealthCheckConfig,
+    check_sources_health,
+    get_health_checker,
+)
+from .source_discovery import (
+    SourceDiscovery,
+    DiscoveredSource,
+    DiscoveryConfig,
+    discover_data_sources,
+    startup_source_check,
 )
 
 __all__ = [
@@ -60,9 +75,20 @@ __all__ = [
     "BaostockFetcher",
     "YfinanceFetcher",
     "CryptoFetcher",
+    "FinshareFetcher",
     "is_us_index_code",
     "is_us_stock_code",
     "is_hk_stock_code",
     "get_us_index_yf_symbol",
     "US_INDEX_MAPPING",
+    "SourceHealthChecker",
+    "HealthCheckResult",
+    "HealthCheckConfig",
+    "check_sources_health",
+    "get_health_checker",
+    "SourceDiscovery",
+    "DiscoveredSource",
+    "DiscoveryConfig",
+    "discover_data_sources",
+    "startup_source_check",
 ]
