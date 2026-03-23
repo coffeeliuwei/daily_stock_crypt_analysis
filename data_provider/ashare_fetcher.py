@@ -322,3 +322,37 @@ class AshareFetcher(BaseFetcher):
         """
         # Ashare 主要支持 A 股
         return market == "cn"
+
+    def get_stock_name(self, stock_code: str) -> Optional[str]:
+        """
+        获取股票名称
+
+        利用腾讯实时行情接口获取股票名称
+
+        Args:
+            stock_code: 股票代码
+
+        Returns:
+            股票名称，失败返回 None
+        """
+        # 检查缓存
+        if not hasattr(self, "_stock_name_cache"):
+            self._stock_name_cache = {}
+
+        if stock_code in self._stock_name_cache:
+            return self._stock_name_cache[stock_code]
+
+        try:
+            # 通过实时行情获取名称
+            quote = self.get_realtime_quote(stock_code)
+            if quote and isinstance(quote, dict):
+                name = quote.get("name")
+                if name:
+                    self._stock_name_cache[stock_code] = name
+                    return name
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"[AshareFetcher] 获取股票名称失败 {stock_code}: {e}")
+            return None

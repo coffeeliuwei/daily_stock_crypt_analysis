@@ -325,6 +325,38 @@ class FinshareFetcher(BaseFetcher):
         """检查数据源是否可用"""
         return self._initialized
 
+    def get_stock_name(self, stock_code: str) -> Optional[str]:
+        """
+        获取股票名称
+
+        利用实时行情接口获取股票名称
+
+        Args:
+            stock_code: 股票代码
+
+        Returns:
+            股票名称，失败返回 None
+        """
+        # 检查缓存
+        if not hasattr(self, "_stock_name_cache"):
+            self._stock_name_cache = {}
+
+        if stock_code in self._stock_name_cache:
+            return self._stock_name_cache[stock_code]
+
+        try:
+            # 通过实时行情获取名称
+            quote = self.get_realtime_quote(stock_code)
+            if quote and quote.name:
+                self._stock_name_cache[stock_code] = quote.name
+                return quote.name
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"[FinshareFetcher] 获取股票名称失败 {stock_code}: {e}")
+            return None
+
     def get_supported_markets(self) -> List[str]:
         """获取支持的市场列表"""
         return ["cn", "hk", "us"]

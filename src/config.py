@@ -397,6 +397,16 @@ class Config:
         default_factory=list
     )  # SearXNG instance URLs (self-hosted, no quota)
 
+    # === 新增免费新闻数据源 ===
+    finnhub_api_keys: List[str] = field(
+        default_factory=list
+    )  # Finnhub API Keys (金融新闻)
+    marketaux_api_keys: List[str] = field(
+        default_factory=list
+    )  # MarketAux API Keys (实体追踪)
+    enable_gnews: bool = True  # 启用 GNews (完全免费，无需 API Key)
+    enable_freenews: bool = True  # 启用 FreeNewsAPI (完全免费，无需 API Key)
+
     # === Social Sentiment (US stocks only, api.adanos.org) ===
     social_sentiment_api_key: Optional[str] = None
     social_sentiment_api_url: str = "https://api.adanos.org"
@@ -974,6 +984,18 @@ class Config:
                 ", ".join(invalid_searxng_urls[:3]),
             )
 
+        # === 新增免费新闻数据源配置 ===
+        finnhub_keys_str = os.getenv("FINNHUB_API_KEYS", "")
+        finnhub_api_keys = [k.strip() for k in finnhub_keys_str.split(",") if k.strip()]
+
+        marketaux_keys_str = os.getenv("MARKETAUX_API_KEYS", "")
+        marketaux_api_keys = [
+            k.strip() for k in marketaux_keys_str.split(",") if k.strip()
+        ]
+
+        enable_gnews = parse_env_bool(os.getenv("ENABLE_GNEWS", "true"), True)
+        enable_freenews = parse_env_bool(os.getenv("ENABLE_FREENEWS", "true"), True)
+
         # 企微消息类型与最大字节数逻辑
         wechat_msg_type = os.getenv("WECHAT_MSG_TYPE", "markdown")
         wechat_msg_type_lower = wechat_msg_type.lower()
@@ -1062,6 +1084,11 @@ class Config:
             brave_api_keys=brave_api_keys,
             serpapi_keys=serpapi_keys,
             searxng_base_urls=searxng_base_urls,
+            # 新增免费新闻数据源
+            finnhub_api_keys=finnhub_api_keys,
+            marketaux_api_keys=marketaux_api_keys,
+            enable_gnews=enable_gnews,
+            enable_freenews=enable_freenews,
             social_sentiment_api_key=os.getenv("SOCIAL_SENTIMENT_API_KEY") or None,
             social_sentiment_api_url=os.getenv(
                 "SOCIAL_SENTIMENT_API_URL", "https://api.adanos.org"
