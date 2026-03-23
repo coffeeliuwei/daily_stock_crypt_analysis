@@ -648,6 +648,7 @@ class DataFetcherManager:
         self._fetchers: List[BaseFetcher] = []
         self._use_pool = use_pool
         self._source_pool: Optional[DataSourcePool] = None
+        self._pool_initialized = False  # Must be set before _init_default_fetchers()
 
         if fetchers:
             # 按优先级排序
@@ -662,9 +663,6 @@ class DataFetcherManager:
         self._fundamental_timeout_slots = BoundedSemaphore(
             self._fundamental_timeout_worker_limit
         )
-
-        # 初始化数据源池（延迟初始化，首次使用时创建）
-        self._pool_initialized = False
 
     def _get_fundamental_cache_key(
         self, stock_code: str, budget_seconds: Optional[float] = None
