@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 🩺 **数据源健康检测** — 启动时自动检测所有数据源是否可用，记录响应时间和成功率，自动排除不可用的数据源。
 - 🔍 **动态数据源发现** — 支持启动时自动搜索网络中的免费数据源，检测可用性后自动加入数据源池。
 - 📦 **新增 FinshareFetcher** — 集成 Finshare 多源聚合数据源（东财/腾讯/新浪/通达信/Baostock），支持 A 股、港股、美股。
+- 📰 **免费新闻数据源** — 新增 GNews、FreeNewsAPI、Finnhub、MarketAux 四个新闻数据源。GNews 和 FreeNewsAPI 完全免费无需 API Key，设为最高优先级。
+- 📡 **新增 AshareFetcher** — 腾讯财经 API 数据源，完全免费无需 API Key，支持 A 股实时行情和历史数据。
+- 🪙 **加密货币 API** — 新增 REST API 接口：实时行情、历史 K 线、热门币种、支持符号列表。支持 26+ 主流加密货币（BTC、ETH、SOL 等）。
+- 📊 **加密货币数据源池** — Hyperliquid → Bybit → Binance → QVeris 多数据源 fallback，无区域限制。
 
 ### 变更
 
@@ -25,14 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 新增配置项 `SOURCE_FAILURE_THRESHOLD`：连续失败次数触发冷却（默认 3）
 - 新增配置项 `SOURCE_COOLDOWN_SECONDS`：数据源冷却时间（默认 300 秒）
 - 新增配置项 `MODEL_SELECTION_MODE`：模型选择模式（random/sequential/least_latency，默认 random）
+- 新增配置项 `ENABLE_GNEWS`：启用 GNews 免费新闻源（默认 true）
+- 新增配置项 `ENABLE_FREENEWS`：启用 FreeNewsAPI 免费新闻源（默认 true）
+- 新增配置项 `FINNHUB_API_KEYS`：Finnhub 金融新闻 API Key
+- 新增配置项 `MARKETAUX_API_KEYS`：MarketAux 金融新闻 API Key
 - `OPENAI_MODEL` 支持逗号分隔多个模型，如 `qwen-turbo,qwen-plus,qwen-max`
-- 数据源列表新增 `FinshareFetcher`（Priority 1），共 9 个数据源
+- 数据源列表新增 `FinshareFetcher`、`AshareFetcher`（Priority 1），共 10+ 个数据源
+- 新闻搜索优先级调整：免费数据源（GNews、FreeNewsAPI）> 付费数据源 > 自建兜底
 
 ### 说明
 
-- 加密货币分析保持原有逻辑，暂未纳入数据源池化范围
+- 加密货币分析保持原有逻辑，暂未纳入股票数据源池化范围
 - 数据源池排除 `CryptoFetcher` 和 `YfinanceFetcher`，它们有专门的路由逻辑
 - 启动时会自动检测数据源健康状态，日志中显示可用数据源列表
+- 加密货币数据源优先级：Hyperliquid（无区域限制）→ Bybit → Binance → QVeris
 
 ## [3.8.0] - 2026-03-17
 
