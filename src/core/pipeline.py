@@ -198,32 +198,47 @@ class StockAnalysisPipeline:
 
         排除：CryptoFetcher（加密货币专用）、YfinanceFetcher（美股专用）
 
+        优先使用启动时健康检测结果（config._source_health_report）
+
         Returns:
             可用数据源数量
         """
         try:
-            # 获取所有数据源
-            all_fetchers = getattr(self.fetcher_manager, "_fetchers", [])
+            # 排除的专用数据源
+            excluded_names = {"CryptoFetcher", "YfinanceFetcher"}
 
-            # 过滤掉专用数据源，只保留可用于普通股票的数据源
-            stock_fetchers = [
-                f
-                for f in all_fetchers
-                if f.name not in ("CryptoFetcher", "YfinanceFetcher")
-            ]
+            # 优先从启动时健康检测报告获取可用数据源
+            health_report = getattr(self.config, "_source_health_report", None)
+            if health_report and "sources" in health_report:
+                available_count = 0
+                for source in health_report["sources"]:
+                    name = source.get("name", "")
+                    status = source.get("status", "")
+                    # 排除专用数据源，只统计可用状态的
+                    if name not in excluded_names and status == "available":
+                        available_count += 1
 
-            # 进一步过滤：只保留健康可用的数据源
-            # 检查数据源池的健康报告
-            health_report = self.fetcher_manager.get_pool_health_report()
-            if health_report:
+                if available_count > 0:
+                    logger.info(
+                        f"[动态并发] 从健康检测报告获取可用数据源: {available_count} 个"
+                    )
+                    return available_count
+
+            # 回退：检查数据源池的健康报告（运行时状态）
+            pool_health = self.fetcher_manager.get_pool_health_report()
+            if pool_health:
                 available = [
                     name
-                    for name, info in health_report.items()
-                    if not info.get("in_cooldown", False)
+                    for name, info in pool_health.items()
+                    if name not in excluded_names
+                    and not info.get("in_cooldown", False)
                     and info.get("health_score", 1.0) > 0.1
                 ]
                 return len(available)
 
+            # 最后回退：统计所有股票数据源
+            all_fetchers = getattr(self.fetcher_manager, "_fetchers", [])
+            stock_fetchers = [f for f in all_fetchers if f.name not in excluded_names]
             return len(stock_fetchers)
 
         except Exception as e:
