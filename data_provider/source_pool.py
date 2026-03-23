@@ -128,62 +128,89 @@ class DataSourcePool:
         self,
         exclude_names: Optional[List[str]] = None,
         prefer_names: Optional[List[str]] = None,
+        timeout: float = 30.0,
     ) -> Optional[Tuple[Any, RLock]]:
         """
-        获取一个可用的数据源（带锁）
+        获取一个可用的数据源（带锁，支持等待）
 
         Args:
             exclude_names: 排除的数据源名称列表
             prefer_names: 优先选择的数据源名称列表
+            timeout: 最大等待时间（秒），默认30秒
 
         Returns:
-            (fetcher, lock) 或 None（所有数据源都不可用）
+            (fetcher, lock) 或 None（超时后仍无法获取）
         """
+        import time
+
         exclude_names = exclude_names or []
+        start_time = time.time()
+        retry_interval = 0.1  # 每次重试间隔
+        attempt = 0
 
-        with self._global_lock:
-            self._total_acquires += 1
+        while True:
+            attempt += 1
+            elapsed = time.time() - start_time
 
-            # 获取可用数据源列表
-            available = self._get_available_fetchers(exclude_names)
-
-            if not available:
+            # 检查超时
+            if elapsed >= timeout:
                 logger.warning(
-                    f"[DataSourcePool] No available fetchers "
-                    f"(excluded: {exclude_names}, all in cooldown or locked)"
+                    f"[DataSourcePool] Acquire timeout after {elapsed:.1f}s "
+                    f"(excluded: {exclude_names})"
                 )
                 return None
 
-            # 根据选择模式选择数据源
-            selected = self._select_fetcher(available, prefer_names)
+            with self._global_lock:
+                self._total_acquires += 1
 
-            if selected is None:
-                return None
+                # 获取可用数据源列表
+                available = self._get_available_fetchers(exclude_names)
 
-            # 尝试获取锁（非阻塞）
-            lock = self._locks[selected.name]
-            if lock.acquire(blocking=False):
-                logger.debug(
-                    f"[DataSourcePool] Acquired fetcher: {selected.name} "
-                    f"(health: {self._health[selected.name].health_score:.2f})"
-                )
-                return (selected, lock)
-
-            # 锁被占用，尝试其他数据源
-            for fetcher in available:
-                if fetcher.name == selected.name:
+                if not available:
+                    # 所有数据源都在冷却中，等待后重试
+                    if attempt == 1:
+                        logger.debug(
+                            f"[DataSourcePool] No available fetchers (all in cooldown), waiting..."
+                        )
+                    time.sleep(retry_interval)
                     continue
-                lock = self._locks[fetcher.name]
+
+                # 根据选择模式选择数据源
+                selected = self._select_fetcher(available, prefer_names)
+
+                if selected is None:
+                    time.sleep(retry_interval)
+                    continue
+
+                # 尝试获取锁（非阻塞）
+                lock = self._locks[selected.name]
                 if lock.acquire(blocking=False):
                     logger.debug(
-                        f"[DataSourcePool] Acquired fetcher (fallback): {fetcher.name}"
+                        f"[DataSourcePool] Acquired fetcher: {selected.name} "
+                        f"(health: {self._health[selected.name].health_score:.2f}, "
+                        f"attempt: {attempt}, elapsed: {elapsed:.1f}s)"
                     )
-                    return (fetcher, lock)
+                    return (selected, lock)
 
-            logger.warning(
-                f"[DataSourcePool] All {len(available)} available fetchers are locked"
-            )
-            return None
+                # 锁被占用，尝试其他数据源
+                for fetcher in available:
+                    if fetcher.name == selected.name:
+                        continue
+                    lock = self._locks[fetcher.name]
+                    if lock.acquire(blocking=False):
+                        logger.debug(
+                            f"[DataSourcePool] Acquired fetcher (fallback): {fetcher.name} "
+                            f"(attempt: {attempt}, elapsed: {elapsed:.1f}s)"
+                        )
+                        return (fetcher, lock)
+
+                # 所有可用数据源都被锁定，等待后重试
+                if attempt == 1:
+                    logger.debug(
+                        f"[DataSourcePool] All {len(available)} available fetchers are locked, "
+                        f"waiting for release..."
+                    )
+                time.sleep(retry_interval)
 
     def release_fetcher(
         self, name: str, success: bool, latency: Optional[float] = None
