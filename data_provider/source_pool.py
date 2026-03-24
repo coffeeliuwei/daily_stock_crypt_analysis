@@ -35,20 +35,9 @@ class SourceSelectionMode(Enum):
     PRIORITY = "priority"  # 按优先级顺序（原有逻辑）
 
 
-@dataclass
+@dataclass(slots=True)
 class SourceHealth:
-    """数据源健康状态（内存优化：使用 __slots__）"""
-
-    __slots__ = (
-        "name",
-        "health_score",
-        "failure_count",
-        "success_count",
-        "last_failure_time",
-        "cooldown_until",
-        "avg_latency",
-        "total_requests",
-    )
+    """数据源健康状态（内存优化：使用 slots=True）"""
 
     name: str
     health_score: float = 1.0  # 健康分数 0-1
@@ -60,19 +49,9 @@ class SourceHealth:
     total_requests: int = 0  # 总请求数
 
 
-@dataclass
+@dataclass(slots=True)
 class SourcePoolConfig:
-    """数据源池配置（内存优化：使用 __slots__）"""
-
-    __slots__ = (
-        "selection_mode",
-        "failure_threshold",
-        "cooldown_seconds",
-        "health_decay",
-        "health_recovery",
-        "min_health_score",
-        "max_lock_wait_seconds",
-    )
+    """数据源池配置（内存优化：使用 slots=True）"""
 
     selection_mode: SourceSelectionMode = SourceSelectionMode.RANDOM
     failure_threshold: int = 3  # 连续失败次数触发冷却

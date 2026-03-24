@@ -425,7 +425,7 @@ class TTLCache:
     用于缓存函数调用结果，减少重复网络请求和数据库查询。
 
     使用示例:
-        cache = TTLCache(default_ttl=300)  # 5分钟缓存
+        cache = TTLCache(default_ttl=300, max_size=1000)  # 5分钟缓存，最多1000条
 
         @cache.cached(key_func=lambda x: f"stock:{x}")
         def get_stock_data(code: str):
@@ -433,16 +433,18 @@ class TTLCache:
             return fetch_from_api(code)
     """
 
-    def __init__(self, default_ttl: int = 300):
+    def __init__(self, default_ttl: int = 300, max_size: int = 10000):
         """
         初始化 TTL 缓存。
 
         Args:
             default_ttl: 默认缓存时间（秒），默认 5 分钟
+            max_size: 最大缓存条目数，默认 10000
         """
         self._cache: Dict[str, Tuple[float, Any]] = {}
         self._lock = threading.RLock()
         self._default_ttl = default_ttl
+        self._max_size = max_size
 
     def get(self, key: str) -> Optional[Any]:
         """获取缓存值，如果过期或不存在返回 None。"""
@@ -456,10 +458,36 @@ class TTLCache:
             return value
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """设置缓存值。"""
+        """设置缓存值，超出 max_size 时清理过期条目。"""
         with self._lock:
+            # 如果超出最大条目数，先清理过期条目
+            if len(self._cache) >= self._max_size:
+                self._cleanup_expired()
+
+            # 如果仍然超出，删除最旧的条目（按过期时间排序）
+            if len(self._cache) >= self._max_size:
+                # 按过期时间排序，删除最早过期的
+                sorted_keys = sorted(
+                    self._cache.keys(), key=lambda k: self._cache[k][0]
+                )
+                keys_to_remove = sorted_keys[: len(self._cache) - self._max_size + 1]
+                for k in keys_to_remove:
+                    del self._cache[k]
+
             expire_time = time.time() + (ttl if ttl is not None else self._default_ttl)
             self._cache[key] = (expire_time, value)
+
+    def _cleanup_expired(self) -> int:
+        """清理所有过期条目，返回清理数量。"""
+        current_time = time.time()
+        expired_keys = [
+            k
+            for k, (expire_time, _) in self._cache.items()
+            if current_time > expire_time
+        ]
+        for k in expired_keys:
+            del self._cache[k]
+        return len(expired_keys)
 
     def delete(self, key: str) -> None:
         """删除缓存值。"""
@@ -515,13 +543,13 @@ class TTLCache:
 
 
 # 全局缓存实例
-# - 历史数据缓存: 1 小时
-# - 筹码分布缓存: 30 分钟
-# - 新闻搜索缓存: 15 分钟
-GLOBAL_CACHE = TTLCache(default_ttl=300)
-HISTORICAL_DATA_CACHE = TTLCache(default_ttl=3600)  # 1 小时
-CHIP_DISTRIBUTION_CACHE = TTLCache(default_ttl=1800)  # 30 分钟
-NEWS_CACHE = TTLCache(default_ttl=900)  # 15 分钟
+# - 历史数据缓存: 1 小时，最多 500 条
+# - 筹码分布缓存: 30 分钟，最多 200 条
+# - 新闻搜索缓存: 15 分钟，最多 1000 条
+GLOBAL_CACHE = TTLCache(default_ttl=300, max_size=5000)
+HISTORICAL_DATA_CACHE = TTLCache(default_ttl=3600, max_size=500)  # 1 小时
+CHIP_DISTRIBUTION_CACHE = TTLCache(default_ttl=1800, max_size=200)  # 30 分钟
+NEWS_CACHE = TTLCache(default_ttl=900, max_size=1000)  # 15 分钟
 
 
 # === HTTP 连接池管理器 ===

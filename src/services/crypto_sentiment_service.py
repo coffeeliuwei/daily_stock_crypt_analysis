@@ -12,6 +12,8 @@ from typing import Optional, Dict, Any
 
 import httpx
 
+from data_provider.utils import get_http_client
+
 logger = logging.getLogger(__name__)
 
 # QVeris API 配置
@@ -175,14 +177,22 @@ class CryptoSentimentService:
             搜索结果
         """
         try:
-            with httpx.Client(timeout=QVERIS_TIMEOUT) as client:
+            client = get_http_client()
+            if client:
                 response = client.post(
                     f"{QVERIS_BASE_URL}/search",
                     headers=self._get_headers(),
                     json={"query": query, "limit": limit},
                 )
-                response.raise_for_status()
-                return response.json()
+            else:
+                with httpx.Client(timeout=QVERIS_TIMEOUT) as temp_client:
+                    response = temp_client.post(
+                        f"{QVERIS_BASE_URL}/search",
+                        headers=self._get_headers(),
+                        json={"query": query, "limit": limit},
+                    )
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             logger.warning(f"[CryptoSentimentService] 搜索工具失败: {e}")
             return {}
@@ -207,7 +217,8 @@ class CryptoSentimentService:
             执行结果
         """
         try:
-            with httpx.Client(timeout=QVERIS_TIMEOUT) as client:
+            client = get_http_client()
+            if client:
                 response = client.post(
                     f"{QVERIS_BASE_URL}/tools/execute",
                     params={"tool_id": tool_id},
@@ -218,8 +229,20 @@ class CryptoSentimentService:
                         "max_response_size": max_response_size,
                     },
                 )
-                response.raise_for_status()
-                return response.json()
+            else:
+                with httpx.Client(timeout=QVERIS_TIMEOUT) as temp_client:
+                    response = temp_client.post(
+                        f"{QVERIS_BASE_URL}/tools/execute",
+                        params={"tool_id": tool_id},
+                        headers=self._get_headers(),
+                        json={
+                            "search_id": search_id,
+                            "parameters": parameters,
+                            "max_response_size": max_response_size,
+                        },
+                    )
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             logger.warning(f"[CryptoSentimentService] 执行工具失败: {e}")
             return {"success": False, "error_message": str(e)}

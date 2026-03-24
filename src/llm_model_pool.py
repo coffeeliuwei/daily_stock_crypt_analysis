@@ -37,19 +37,9 @@ class ModelSelectionMode(Enum):
     LEAST_LATENCY = "least_latency"  # 选择延迟最低的
 
 
-@dataclass
+@dataclass(slots=True)
 class ModelHealth:
-    """模型健康状态（内存优化：使用 __slots__）"""
-
-    __slots__ = (
-        "name",
-        "health_score",
-        "failure_count",
-        "success_count",
-        "avg_latency",
-        "total_requests",
-        "last_error",
-    )
+    """模型健康状态（内存优化：使用 slots=True）"""
 
     name: str
     health_score: float = 1.0  # 健康分数 0-1
@@ -60,17 +50,9 @@ class ModelHealth:
     last_error: Optional[str] = None  # 最后一次错误
 
 
-@dataclass
+@dataclass(slots=True)
 class ModelPoolConfig:
-    """模型池配置（内存优化：使用 __slots__）"""
-
-    __slots__ = (
-        "selection_mode",
-        "health_decay",
-        "health_recovery",
-        "min_health_score",
-        "latency_weight",
-    )
+    """模型池配置（内存优化：使用 slots=True）"""
 
     selection_mode: ModelSelectionMode = ModelSelectionMode.RANDOM
     health_decay: float = 0.1  # 失败时健康分衰减

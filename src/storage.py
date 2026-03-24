@@ -1457,35 +1457,46 @@ class DatabaseManager:
             logger.warning(f"保存数据为空，跳过 {code}")
             return 0
 
-        # 预处理数据：解析日期并构建记录列表
-        records = []
-        for _, row in df.iterrows():
-            row_date = row.get("date")
-            if isinstance(row_date, str):
-                row_date = datetime.strptime(row_date, "%Y-%m-%d").date()
-            elif isinstance(row_date, datetime):
-                row_date = row_date.date()
-            elif isinstance(row_date, pd.Timestamp):
-                row_date = row_date.date()
+        # 优化：预处理日期列并批量转换
+        df = df.copy()  # 避免修改原始 DataFrame
 
-            records.append(
-                {
-                    "code": code,
-                    "date": row_date,
-                    "open": row.get("open"),
-                    "high": row.get("high"),
-                    "low": row.get("low"),
-                    "close": row.get("close"),
-                    "volume": row.get("volume"),
-                    "amount": row.get("amount"),
-                    "pct_chg": row.get("pct_chg"),
-                    "ma5": row.get("ma5"),
-                    "ma10": row.get("ma10"),
-                    "ma20": row.get("ma20"),
-                    "volume_ratio": row.get("volume_ratio"),
-                    "data_source": data_source,
-                }
-            )
+        def normalize_date(val):
+            """将日期值转换为 date 对象"""
+            if isinstance(val, str):
+                return datetime.strptime(val, "%Y-%m-%d").date()
+            elif isinstance(val, datetime):
+                return val.date()
+            elif isinstance(val, pd.Timestamp):
+                return val.date()
+            return val
+
+        df["date"] = df["date"].apply(normalize_date)
+
+        # 添加 code 和 data_source 列
+        df["code"] = code
+        df["data_source"] = data_source
+
+        # 选择需要的列并转换为字典列表
+        columns = [
+            "code",
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "pct_chg",
+            "ma5",
+            "ma10",
+            "ma20",
+            "volume_ratio",
+            "data_source",
+        ]
+
+        # 只选择存在的列
+        available_columns = [col for col in columns if col in df.columns]
+        records = df[available_columns].to_dict("records")
 
         if not records:
             return 0
