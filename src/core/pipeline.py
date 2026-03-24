@@ -1555,31 +1555,53 @@ class StockAnalysisPipeline:
             logger.error("未配置自选股列表，请在 .env 文件中设置 STOCK_LIST")
             return []
 
-        # 动态计算并发数（根据股票数量）
+        # === 拆分股票和加密货币列表，优先分析加密货币 ===
+        from data_provider.base import _is_crypto_code
+
+        crypto_codes = [code for code in stock_codes if _is_crypto_code(code)]
+        stock_codes_only = [code for code in stock_codes if not _is_crypto_code(code)]
+
+        if crypto_codes:
+            logger.info(
+                f"[股票/加密货币拆分] 检测到 {len(crypto_codes)} 只加密货币: {', '.join(crypto_codes)}"
+            )
+            logger.info(f"[股票/加密货币拆分] 检测到 {len(stock_codes_only)} 只股票")
+        else:
+            logger.info(
+                f"[股票/加密货币拆分] 未检测到加密货币，共 {len(stock_codes_only)} 只股票"
+            )
+
+        # 动态计算并发数（根据股票数量，不含加密货币）
         if self._use_dynamic_workers:
-            effective_workers = self._calculate_dynamic_workers(len(stock_codes))
+            effective_workers = self._calculate_dynamic_workers(len(stock_codes_only))
         else:
             effective_workers = self.max_workers
 
-        logger.info(f"===== 开始分析 {len(stock_codes)} 只股票 =====")
-        logger.info(f"股票列表: {', '.join(stock_codes)}")
+        total_count = len(crypto_codes) + len(stock_codes_only)
+        logger.info(f"===== 开始分析 {total_count} 只资产 =====")
+        if crypto_codes:
+            logger.info(f"加密货币列表: {', '.join(crypto_codes)}")
+        if stock_codes_only:
+            logger.info(f"股票列表: {', '.join(stock_codes_only)}")
         logger.info(
             f"并发数: {effective_workers}, 模式: {'仅获取数据' if dry_run else '完整分析'}"
         )
 
-        # === 批量预取实时行情（优化：避免每只股票都触发全量拉取）===
+        # === 批量预取实时行情（优化：仅预取股票，加密货币有独立数据源）===
         # 只有股票数量 >= 5 时才进行预取，少量股票直接逐个查询更高效
-        if len(stock_codes) >= 5:
-            prefetch_count = self.fetcher_manager.prefetch_realtime_quotes(stock_codes)
+        if len(stock_codes_only) >= 5:
+            prefetch_count = self.fetcher_manager.prefetch_realtime_quotes(
+                stock_codes_only
+            )
             if prefetch_count > 0:
                 logger.info(
-                    f"已启用批量预取架构：一次拉取全市场数据，{len(stock_codes)} 只股票共享缓存"
+                    f"已启用批量预取架构：一次拉取全市场数据，{len(stock_codes_only)} 只股票共享缓存"
                 )
 
         # Issue #455: 预取股票名称，避免并发分析时显示「股票xxxxx」
         # dry_run 仅做数据拉取，不需要名称预取，避免额外网络开销
-        if not dry_run:
-            self.fetcher_manager.prefetch_stock_names(stock_codes, use_bulk=False)
+        if not dry_run and stock_codes_only:
+            self.fetcher_manager.prefetch_stock_names(stock_codes_only, use_bulk=False)
 
         # 单股推送模式（#55）：从配置读取
         single_stock_notify = getattr(self.config, "single_stock_notify", False)
@@ -1601,41 +1623,69 @@ class StockAnalysisPipeline:
 
         results: List[AnalysisResult] = []
 
-        # 使用线程池并发处理
-        # 注意：effective_workers 根据股票数量动态计算，避免过度并发
-        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            # 提交任务
-            future_to_code = {
-                executor.submit(
-                    self.process_single_stock,
-                    code,
-                    skip_analysis=dry_run,
-                    single_stock_notify=single_stock_notify and send_notification,
-                    report_type=report_type,  # Issue #119: 传递报告类型
-                    analysis_query_id=uuid.uuid4().hex,
-                ): code
-                for code in stock_codes
-            }
-
-            # 收集结果
-            for idx, future in enumerate(as_completed(future_to_code)):
-                code = future_to_code[future]
+        # === Phase 1: 先分析加密货币（优先处理）===
+        if crypto_codes:
+            logger.info(f"===== Phase 1: 分析 {len(crypto_codes)} 只加密货币 =====")
+            for code in crypto_codes:
                 try:
-                    result = future.result()
+                    query_id = uuid.uuid4().hex
+                    result = self.process_single_stock(
+                        code,
+                        skip_analysis=dry_run,
+                        single_stock_notify=single_stock_notify and send_notification,
+                        report_type=report_type,
+                        analysis_query_id=query_id,
+                    )
                     if result:
                         results.append(result)
-
-                    # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
-                    if idx < len(stock_codes) - 1 and analysis_delay > 0:
-                        # 注意：此 sleep 发生在“主线程收集 future 的循环”中，
-                        # 并不会阻止线程池中的任务同时发起网络请求。
-                        # 因此它对降低并发请求峰值的效果有限；真正的峰值主要由 max_workers 决定。
-                        # 该行为目前保留（按需求不改逻辑）。
-                        logger.debug(f"等待 {analysis_delay} 秒后继续下一只股票...")
-                        time.sleep(analysis_delay)
-
+                        logger.info(
+                            f"[加密货币] {result.name}({code}) 分析完成: "
+                            f"{result.operation_advice}, 评分 {result.sentiment_score}"
+                        )
                 except Exception as e:
-                    logger.error(f"[{code}] 任务执行失败: {e}")
+                    logger.error(f"[{code}] 加密货币分析失败: {e}")
+
+            logger.info(
+                f"===== 加密货币分析完成，共 {len([r for r in results if _is_crypto_code(r.code)])} 只 ====="
+            )
+
+        # === Phase 2: 再分析股票（使用线程池并发）===
+        if stock_codes_only:
+            logger.info(f"===== Phase 2: 分析 {len(stock_codes_only)} 只股票 =====")
+            # 注意：effective_workers 根据股票数量动态计算，避免过度并发
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                # 提交任务
+                future_to_code = {
+                    executor.submit(
+                        self.process_single_stock,
+                        code,
+                        skip_analysis=dry_run,
+                        single_stock_notify=single_stock_notify and send_notification,
+                        report_type=report_type,  # Issue #119: 传递报告类型
+                        analysis_query_id=uuid.uuid4().hex,
+                    ): code
+                    for code in stock_codes_only
+                }
+
+                # 收集结果
+                for idx, future in enumerate(as_completed(future_to_code)):
+                    code = future_to_code[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            results.append(result)
+
+                        # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
+                        if idx < len(stock_codes_only) - 1 and analysis_delay > 0:
+                            # 注意：此 sleep 发生在"主线程收集 future 的循环"中，
+                            # 并不会阻止线程池中的任务同时发起网络请求。
+                            # 因此它对降低并发请求峰值的效果有限；真正的峰值主要由 max_workers 决定。
+                            # 该行为目前保留（按需求不改逻辑）。
+                            logger.debug(f"等待 {analysis_delay} 秒后继续下一只股票...")
+                            time.sleep(analysis_delay)
+
+                    except Exception as e:
+                        logger.error(f"[{code}] 任务执行失败: {e}")
 
         # 统计
         elapsed_time = time.time() - start_time
@@ -1644,12 +1694,13 @@ class StockAnalysisPipeline:
         if dry_run:
             # 检查哪些股票的数据今天已存在
             success_count = sum(
-                1 for code in stock_codes if self.db.has_today_data(code)
+                1 for code in stock_codes_only if self.db.has_today_data(code)
             )
-            fail_count = len(stock_codes) - success_count
+            # 加密货币没有本地数据库缓存，不计入统计
+            fail_count = len(stock_codes_only) - success_count
         else:
             success_count = len(results)
-            fail_count = len(stock_codes) - success_count
+            fail_count = (len(crypto_codes) + len(stock_codes_only)) - success_count
 
         logger.info("===== 分析完成 =====")
         logger.info(
