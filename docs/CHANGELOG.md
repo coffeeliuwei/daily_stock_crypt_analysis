@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 数据源列表新增 `FinshareFetcher`、`AshareFetcher`（Priority 1），共 10+ 个数据源
 - 新闻搜索优先级调整：免费数据源（GNews、FreeNewsAPI）> 付费数据源 > 自建兜底
 
+### 修复
+
+- 🪙 **加密货币交易日过滤 Bug** — 修复 `get_open_markets_today()` 未包含 `crypto` 市场导致 BTC 等加密货币被交易日过滤器错误排除的问题。加密货币市场 24/7 运行，现始终包含在"开市市场"列表中。
+
 ### 说明
 
 - 加密货币分析保持原有逻辑，暂未纳入股票数据源池化范围

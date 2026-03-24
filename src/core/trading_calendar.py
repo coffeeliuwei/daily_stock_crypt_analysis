@@ -75,12 +75,16 @@ def is_market_open(market: str, check_date: date) -> bool:
     Fail-open: returns True if exchange-calendars unavailable or date out of range.
 
     Args:
-        market: 'cn' | 'hk' | 'us'
+        market: 'cn' | 'hk' | 'us' | 'crypto'
         check_date: Date to check
 
     Returns:
         True if trading day (or fail-open), False otherwise
     """
+    # Crypto markets are 24/7 - always open
+    if market == "crypto":
+        return True
+
     if not _XCALS_AVAILABLE:
         return True
     ex = MARKET_EXCHANGE.get(market)
@@ -100,10 +104,10 @@ def get_open_markets_today() -> Set[str]:
     Get markets that are open today (by each market's local timezone).
 
     Returns:
-        Set of market keys ('cn', 'hk', 'us') that are trading today
+        Set of market keys ('cn', 'hk', 'us', 'crypto') that are trading today
     """
     if not _XCALS_AVAILABLE:
-        return {"cn", "hk", "us"}
+        return {"cn", "hk", "us", "crypto"}
     result: Set[str] = set()
     from zoneinfo import ZoneInfo
 
@@ -116,6 +120,10 @@ def get_open_markets_today() -> Set[str]:
         except Exception as e:
             logger.warning("get_open_markets_today fail-open for %s: %s", mkt, e)
             result.add(mkt)
+
+    # Crypto markets are always open (24/7)
+    result.add("crypto")
+
     return result
 
 
