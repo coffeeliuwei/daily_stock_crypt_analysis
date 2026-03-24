@@ -139,6 +139,7 @@ def summarize_exception(exc: Exception) -> Tuple[str, str]:
     return error_type, " ".join(message.split())
 
 
+@functools.lru_cache(maxsize=10000)
 def normalize_stock_code(stock_code: str) -> str:
     """
     Normalize stock code by stripping exchange prefixes/suffixes.
@@ -202,6 +203,7 @@ def normalize_stock_code(stock_code: str) -> str:
     return code
 
 
+@functools.lru_cache(maxsize=10000)
 def _is_crypto_code(code: str) -> bool:
     """
     Detect cryptocurrency symbols with flexible matching.
@@ -253,6 +255,7 @@ def _is_crypto_code(code: str) -> bool:
     return False
 
 
+@functools.lru_cache(maxsize=10000)
 def _is_us_market(code: str) -> bool:
     """
     判断是否为美股/美股指数代码（不含中文前后缀）。
@@ -269,6 +272,7 @@ def _is_us_market(code: str) -> bool:
     return is_us_index_code(normalized) or is_us_stock_code(normalized)
 
 
+@functools.lru_cache(maxsize=10000)
 def _is_hk_market(code: str) -> bool:
     """
     判定是否为港股代码。
@@ -293,6 +297,7 @@ def _is_hk_market(code: str) -> bool:
     return False
 
 
+@functools.lru_cache(maxsize=10000)
 def _is_etf_code(code: str) -> bool:
     """
     判定 A 股 ETF 基金代码（保守规则）。
@@ -311,6 +316,7 @@ def _is_etf_code(code: str) -> bool:
     )
 
 
+@functools.lru_cache(maxsize=10000)
 def _market_tag(code: str) -> str:
     """
     返回市场标签。
@@ -330,6 +336,7 @@ def _market_tag(code: str) -> str:
     return "cn"
 
 
+@functools.lru_cache(maxsize=10000)
 def is_bse_code(code: str) -> bool:
     """
     Check if the code is a Beijing Stock Exchange (BSE) A-share code.
@@ -515,3 +522,71 @@ GLOBAL_CACHE = TTLCache(default_ttl=300)
 HISTORICAL_DATA_CACHE = TTLCache(default_ttl=3600)  # 1 小时
 CHIP_DISTRIBUTION_CACHE = TTLCache(default_ttl=1800)  # 30 分钟
 NEWS_CACHE = TTLCache(default_ttl=900)  # 15 分钟
+
+
+# === HTTP 连接池管理器 ===
+
+_http_client = None
+_http_client_lock = threading.Lock()
+
+
+def get_http_client(timeout: float = 30.0, max_connections: int = 100):
+    """
+    获取全局 HTTP 客户端连接池（懒加载单例）。
+
+    性能优化：
+    - 复用 TCP 连接，避免每次请求创建新连接
+    - 连接池限制防止资源耗尽
+    - 保持 Keep-Alive 减少握手开销
+
+    Args:
+        timeout: 请求超时时间（秒）
+        max_connections: 最大连接数
+
+    Returns:
+        httpx.Client 实例
+    """
+    global _http_client
+
+    if _http_client is None:
+        with _http_client_lock:
+            # 双重检查锁定
+            if _http_client is None:
+                try:
+                    import httpx
+
+                    _http_client = httpx.Client(
+                        timeout=timeout,
+                        limits=httpx.Limits(
+                            max_connections=max_connections,
+                            max_keepalive_connections=max_connections // 5,
+                            keepalive_expiry=30.0,
+                        ),
+                        follow_redirects=True,
+                    )
+                    logger.info(
+                        f"[HTTPPool] Created connection pool: max_connections={max_connections}"
+                    )
+                except ImportError:
+                    logger.warning("[HTTPPool] httpx not installed, returning None")
+                    return None
+
+    return _http_client
+
+
+def close_http_client():
+    """关闭全局 HTTP 客户端连接池。"""
+    global _http_client
+
+    if _http_client is not None:
+        with _http_client_lock:
+            if _http_client is not None:
+                _http_client.close()
+                _http_client = None
+                logger.info("[HTTPPool] Connection pool closed")
+
+
+# 程序退出时自动关闭
+import atexit
+
+atexit.register(close_http_client)
