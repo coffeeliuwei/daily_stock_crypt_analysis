@@ -26,15 +26,6 @@ English | [简体中文](../README.md) | [繁體中文](README_CHT.md)
 
 </div>
 
-## 💖 Sponsors
-
-<div align="center">
-  <a href="https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis" target="_blank">
-    <img src="../sources/serpapi_banner_en.png" alt="Easily scrape real-time financial news data from search engines - SerpApi" height="160">
-  </a>
-</div>
-<br>
-
 ## ✨ Key Features
 
 | Module | Feature | Description |
@@ -54,7 +45,9 @@ English | [简体中文](../README.md) | [繁體中文](README_CHT.md)
 |------|----------|
 | LLMs | Gemini (free), OpenAI-compatible, DeepSeek, Qwen, Claude, Ollama |
 | Market Data | AkShare, Tushare, Pytdx, Baostock, YFinance |
+| **Data Source Pool** | **9 data sources with pool management, auto health detection, random selection + mutual exclusion + auto fallback** |
 | News Search | Tavily, SerpAPI, Bocha, Brave, MiniMax |
+| **Free News Sources** | **GNews (free, no API key), FreeNewsAPI (1M/day), Finnhub (60/min), MarketAux (100/day)** |
 
 ### Built-in Trading Rules
 
@@ -128,7 +121,7 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) Search API (for news) | Recommended |
 | `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimaxi.com/) Coding Plan Web Search (structured search results) | Optional |
 | `BRAVE_API_KEYS` | [Brave Search](https://brave.com/search/api/) API (privacy-focused, US stocks optimized) | Optional |
-| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) Backup search | Optional |
+| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com) Backup search | Optional |
 | `BOCHA_API_KEYS` | [Bocha Search](https://open.bocha.cn/) Web Search API (Chinese search optimized, supports AI summaries, multiple keys comma-separated) | Optional |
 | `SEARXNG_BASE_URLS` | SearXNG self-hosted instances (quota-free fallback, enable format: json in settings.yml) | Optional |
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/weborder/#/login?reg=834638 ) Token | Optional |

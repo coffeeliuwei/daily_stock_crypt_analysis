@@ -22,15 +22,6 @@
 
 </div>
 
-## 💖 赞助商 (Sponsors)
-<div align="center">
-  <a href="https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis" target="_blank">
-    <img src="./sources/serpapi_banner_zh.png" alt="轻松抓取搜索引擎上的实时金融新闻数据 - SerpApi" height="160">
-  </a>
-</div>
-<br>
-
-
 ## ✨ 功能特性
 
 | 模块 | 功能 | 说明 |
@@ -64,11 +55,12 @@
 
 | 类型 | 支持 |
 |------|------|
-| AI 模型 | [AIHubMix](https://aihubmix.com/?aff=CfMq)、Gemini、OpenAI 兼容、DeepSeek、通义千问、Claude 等（统一通过 [LiteLLM](https://github.com/BerriAI/litellm) 调用，支持多 Key 负载均衡）|
+| AI 模型 | [AIHubMix](https://aihubmix.com)、Gemini、OpenAI 兼容、DeepSeek、通义千问、Claude 等（统一通过 [LiteLLM](https://github.com/BerriAI/litellm) 调用，支持多 Key 负载均衡）|
 | 行情数据 | [QVeris](https://qveris.ai)（主数据源）、**🆕 Finshare（多源聚合）**、AkShare、Tushare、Pytdx、Baostock、YFinance |
 | **数据源池** | **🆕 9 个数据源池化管理，启动时自动检测健康状态，随机选择+互斥访问+自动降级** |
 | **加密货币数据** | **🆕 Hyperliquid（主源）、Bybit、Binance；实时行情、K线、深度数据** |
 | 新闻搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
+| **免费新闻数据源** | **🆕 GNews（免费，无需API Key）、FreeNewsAPI（100万次/天）、Finnhub（金融专用，60次/分钟）、MarketAux（金融新闻+实体追踪，100次/天）** |
 | **加密货币新闻** | **🆕 Free Crypto News API（200+ 源）、Alternative.me Fear & Greed Index、中文 RSS（Odaily/金色财经/巴比特/PANews/区块律动）** |
 | 社交舆情 | [Stock Sentiment API](https://api.adanos.org/docs)（Reddit / X / Polymarket，仅美股，可选） |
 
@@ -107,11 +99,11 @@
 
 > 现在推荐把多模型配置统一写成 `LLM_CHANNELS + LLM_<NAME>_PROTOCOL/BASE_URL/API_KEY/MODELS/ENABLED`。Web 设置页和 `.env` 使用同一套字段，便于相互切换。
 
-> 💡 **推荐 [AIHubMix](https://aihubmix.com/?aff=CfMq)**：一个 Key 即可使用 Gemini、GPT、Claude、DeepSeek 等全球主流模型，无需科学上网，含免费模型（glm-5、gpt-4o-free 等），付费模型高稳定性无限并发。本项目可享 **10% 充值优惠**。
+> 💡 **推荐 [AIHubMix](https://aihubmix.com)**：一个 Key 即可使用 Gemini、GPT、Claude、DeepSeek 等全球主流模型，无需科学上网，含免费模型（glm-5、gpt-4o-free 等），付费模型高稳定性无限并发。
 
 | Secret 名称 | 说明 | 必填 |
 |------------|------|:----:|
-| `AIHUBMIX_KEY` | [AIHubMix](https://aihubmix.com/?aff=CfMq) API Key，一 Key 切换使用全系模型，免费模型可用 | 可选 |
+| `AIHUBMIX_KEY` | [AIHubMix](https://aihubmix.com) API Key，一 Key 切换使用全系模型，免费模型可用 | 可选 |
 | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/) 获取免费 Key（需科学上网） | 可选 |
 | `ANTHROPIC_API_KEY` | [Anthropic Claude](https://console.anthropic.com/) API Key | 可选 |
 | `ANTHROPIC_MODEL` | Claude 模型（如 `claude-3-5-sonnet-20241022`） | 可选 |
@@ -199,6 +191,25 @@
 | `FUNDAMENTAL_RETRY_MAX` | 基本面能力重试次数（包含首次） | 可选 |
 | `FUNDAMENTAL_CACHE_TTL_SECONDS` | 基本面缓存 TTL（秒） | 可选 |
 | `FUNDAMENTAL_CACHE_MAX_ENTRIES` | 基本面缓存最大条目数（避免长时间运行内存增长） | 可选 |
+| `ENABLE_GNEWS` | 启用 GNews（免费 Google News 抓取，无需 API Key） | 可选 |
+| `ENABLE_FREENEWS` | 启用 FreeNewsAPI（免费，100万次/天） | 可选 |
+| `FINNHUB_API_KEYS` | Finnhub 金融新闻 API（免费版 60次/分钟） | 可选 |
+| `MARKETAUX_API_KEYS` | MarketAux 金融新闻+实体追踪（免费版 100次/天） | 可选 |
+| `AGENT_ARCH` | Agent 架构模式：`single`(默认) / `multi`(多 Agent 编排) | 可选 |
+| `AGENT_ORCHESTRATOR_MODE` | 编排模式：`quick` / `standard` / `full` / `strategy` | 可选 |
+| `AGENT_MEMORY_ENABLED` | 启用记忆与校准系统（追踪历史准确率） | 可选 |
+| `BACKTEST_ENABLED` | 启用回测（默认 true） | 可选 |
+| `BACKTEST_EVAL_WINDOW_DAYS` | 回测评估窗口（交易日数，默认 10） | 可选 |
+| `BACKTEST_MIN_AGE_DAYS` | 仅回测 N 天前的分析记录（默认 14） | 可选 |
+| `SOURCE_SELECTION_MODE` | 数据源选择模式：`random` / `priority` / `round_robin` | 可选 |
+| `REALTIME_SOURCE_PRIORITY` | 实时行情数据源优先级（逗号分隔） | 可选 |
+| `PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT` | 持仓集中度预警阈值（%，默认 35.0） | 可选 |
+| `PORTFOLIO_RISK_DRAWDOWN_ALERT_PCT` | 回撤预警阈值（%，默认 15.0） | 可选 |
+| `WEBUI_HOST` | WebUI 监听地址（默认 127.0.0.1，Docker 需设为 0.0.0.0） | 可选 |
+| `WEBUI_PORT` | WebUI 监听端口（默认 8000） | 可选 |
+| `MODEL_SELECTION_MODE` | 模型选择模式：`random` / `sequential` / `least_latency` | 可选 |
+| `BOT_ENABLED` | 启动机器人服务（默认 false） | 可选 |
+| `BOT_COMMAND_PREFIX` | 机器人命令前缀（默认 "/"） | 可选 |
 
 > 基本面超时语义（P0）：
 > - 当前采用 `best-effort` 软超时（fail-open），超时会立即降级并继续主流程；
@@ -387,6 +398,22 @@ MARKET_REVIEW_REGIONS=both,crypto  # 股票 + 加密货币
 
 **分析 API 说明**：`POST /api/v1/analysis/analyze` 在 `async_mode=false` 时仅支持单只股票；批量 `stock_codes` 需要 `async_mode=true`。异步 `202` 响应对单股返回 `task_id`，对批量返回 `accepted` / `duplicates` 汇总结构；空白股票代码会在服务端过滤，若过滤后为空则返回 `400`。未知 `/api` 路径（含 `/api` 本身）返回 JSON `404`，不再回退到前端页面。详见 [API 规范](docs/architecture/api_spec.json)。
 
+### API 端点概览
+
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/api/v1/analysis/analyze` | POST | 触发股票分析 |
+| `/api/v1/stocks/extract-from-image` | POST | 从图片提取股票代码 |
+| `/api/v1/stocks/parse-import` | POST | 解析 CSV/Excel/剪贴板 |
+| `/api/v1/agent/chat` | POST | Agent 策略对话 |
+| `/api/v1/agent/chat/stream` | POST | Agent 对话（SSE 流式） |
+| `/api/v1/history` | GET | 获取历史分析记录 |
+| `/api/v1/portfolio` | GET/POST | 持仓管理 |
+| `/api/v1/backtest/run` | POST | 执行回测 |
+| `/api/v1/crypto/quote` | GET | 获取加密货币行情 |
+| `/api/v1/auth/login` | POST | 登录认证 |
+| `/api/v1/usage/summary` | GET | LLM token 使用统计 |
+
 ### 历史报告详情
 
 在首页历史记录中选择一条分析记录后，点击「详细报告」按钮可在右侧抽屉中查看与推送通知格式一致的完整 Markdown 分析报告，包含舆情情报、核心结论、数据透视、作战计划等完整内容。
@@ -405,6 +432,12 @@ MARKET_REVIEW_REGIONS=both,crypto  # 股票 + 加密货币
 - **Bot 命令**：`/ask` 策略分析（支持多股对比）、`/chat` 自由对话
 - **自定义策略**：在 `strategies/` 目录下新建 YAML 文件即可添加策略，无需写代码
 - **多 Agent 架构**（实验性）：设置 `AGENT_ARCH=multi` 启用 Technical → Intel → Risk → Strategy → Decision 多 Agent 级联编排，通过 `AGENT_ORCHESTRATOR_MODE` 控制深度（quick/standard/full/strategy）。超时或中间阶段 JSON 解析失败时，系统会优先保留已完成阶段结果并降级生成最小可用仪表盘，避免整份报告直接退回默认占位。详见 [完整配置指南](docs/full-guide.md)
+
+**Agent 增强功能：**
+- **记忆与校准系统**：`AGENT_MEMORY_ENABLED=true` 启用，追踪历史准确率并自动调节置信度
+- **策略自动加权**：`AGENT_STRATEGY_AUTOWEIGHT=true` 自动按回测表现加权策略意见
+- **风控否决**：`AGENT_RISK_OVERRIDE=true` 允许风控 Agent 否决买入信号
+- **策略路由**：`AGENT_STRATEGY_ROUTING=auto` 根据市场状态自动选择策略
 
 > **注意**：配置了任意 AI API Key 后，Agent 对话功能自动可用，无需手动设置 `AGENT_MODE=true`。如需显式关闭可设置 `AGENT_MODE=false`。每次对话会产生 LLM API 调用费用。若你手动修改了 `.env` 中的模型主备配置（如 `LITELLM_MODEL` / `LITELLM_FALLBACK_MODELS` / `LLM_CHANNELS`），需要重启服务或触发配置重载后，新进程才会按新模型生效。
 
@@ -436,17 +469,6 @@ MARKET_REVIEW_REGIONS=both,crypto  # 股票 + 加密货币
 > 有建议？欢迎 [提交 Issue](https://github.com/ZhuLinsen/daily_stock_analysis/issues)
 
 > ⚠️ **UI 调整提示**：项目当前正在持续进行 Web UI 调整与升级，部分页面在过渡阶段可能仍存在样式、交互或兼容性问题。欢迎通过 [Issue](https://github.com/ZhuLinsen/daily_stock_analysis/issues) 反馈问题，或直接提交 [Pull Request](https://github.com/ZhuLinsen/daily_stock_analysis/pulls) 一起完善。
----
-
-## ☕ 支持项目
-
-如果本项目对你有帮助，欢迎支持项目的持续维护与迭代，感谢支持 🙏  
-赞赏可备注联系方式，祝股市长虹
-
-| 支付宝 (Alipay) | 微信支付 (WeChat) | Ko-fi |
-| :---: | :---: | :---: |
-| <img src="./sources/alipay.jpg" width="200" alt="Alipay"> | <img src="./sources/wechatpay.jpg" width="200" alt="WeChat Pay"> | <a href="https://ko-fi.com/mumu157" target="_blank"><img src="./sources/ko-fi.png" width="200" alt="Ko-fi"></a> |
-
 ---
 
 ## 🤝 贡献

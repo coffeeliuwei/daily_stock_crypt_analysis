@@ -251,12 +251,95 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 | Variable | Description | Default |
 |--------|------|--------|
 | `STOCK_LIST` | Watchlist codes (comma-separated) | - |
+| `ADMIN_AUTH_ENABLED` | Web login: set to `true` to enable password protection; set initial password on first visit, change in System Settings > Change Password; reset password via `python -m src.auth reset_password` | `false` |
+| `TRUST_X_FORWARDED_FOR` | Set to `true` when behind reverse proxy to get real IP from `X-Forwarded-For` (rate limiting, etc.); keep `false` for direct public access to prevent spoofing | `false` |
 | `MAX_WORKERS` | Concurrent threads | `3` |
+| `MAX_STOCKS_PER_WORKER` | Max stocks per worker; concurrency = ceil(stock_count / this_value) | `10` |
 | `MARKET_REVIEW_ENABLED` | Enable market review | `true` |
-| `MARKET_REVIEW_REGION` | Market review region: cn (A-shares), us (US stocks), both | `cn` |
+| `MARKET_REVIEW_REGION` | Market review region: cn (A-shares), us (US stocks), both, crypto | `cn` |
+| `TRADING_DAY_CHECK_ENABLED` | Trading day check: default `true`, skip execution on non-trading days; set to `false` or use `--force-run` to force execution (Issue #373) | `true` |
 | `SCHEDULE_ENABLED` | Enable scheduled tasks | `false` |
 | `SCHEDULE_TIME` | Scheduled execution time | `18:00` |
 | `LOG_DIR` | Log directory | `./logs` |
+| `LOG_LEVEL` | Log level (DEBUG/INFO/WARNING/ERROR) | `INFO` |
+
+### Agent Advanced Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `AGENT_ARCH` | Agent architecture mode: `single` (default, single agent) or `multi` (multi-agent orchestration) | `single` |
+| `AGENT_ORCHESTRATOR_MODE` | Multi-agent orchestration mode (only when `AGENT_ARCH=multi`): `quick` (tech→decision, fastest), `standard` (tech→intel→decision), `full` (tech→intel→risk→decision), `strategy` (tech→intel→risk→strategy→decision) | `standard` |
+| `AGENT_ORCHESTRATOR_TIMEOUT_S` | Multi-agent total timeout budget (seconds, 0 = disabled) | `600` |
+| `AGENT_RISK_OVERRIDE` | Whether risk agent can veto buy signals | `true` |
+| `AGENT_MEMORY_ENABLED` | Enable memory & calibration system, tracks historical accuracy and auto-adjusts confidence | `false` |
+| `AGENT_STRATEGY_AUTOWEIGHT` | Auto-weight strategy opinions based on backtest performance | `true` |
+| `AGENT_STRATEGY_ROUTING` | Strategy routing mode: `auto` (auto-select based on market state) or `manual` (use `AGENT_SKILLS` list) | `auto` |
+
+### Data Source Priority Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `EFINANCE_PRIORITY` | Efinance data source priority (lower number = higher priority) | `0` |
+| `EFINANCE_CALL_TIMEOUT` | Efinance API call timeout (seconds), prevents indefinite hangs when Eastmoney hosts unreachable | `30` |
+| `AKSHARE_PRIORITY` | AkShare data source priority | `1` |
+| `TUSHARE_PRIORITY` | Tushare Pro data source priority | `2` |
+| `PYTDX_PRIORITY` | Tongdaxin data source priority | `2` |
+| `PYTDX_HOST` | Tongdaxin custom server host (intranet deployment) | - |
+| `PYTDX_PORT` | Tongdaxin custom server port | `7709` |
+| `PYTDX_SERVERS` | Tongdaxin multi-server config (format: `ip1:port1,ip2:port2`) | - |
+| `BAOSTOCK_PRIORITY` | Baostock data source priority | `3` |
+| `YFINANCE_PRIORITY` | Yahoo Finance data source priority (recommended 0 for US stocks) | `4` |
+
+### Data Source Pool Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `SOURCE_SELECTION_MODE` | Data source selection mode: `random` (recommended), `priority`, `round_robin` | `random` |
+| `SOURCE_FAILURE_THRESHOLD` | Number of consecutive failures before triggering cooldown | `3` |
+| `SOURCE_COOLDOWN_SECONDS` | Data source cooldown time (seconds) | `300` |
+
+### Model Pool Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `MODEL_SELECTION_MODE` | Model selection mode: `random` (recommended), `sequential`, `least_latency` | `random` |
+
+### WebUI Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `WEBUI_ENABLED` | Whether to start WebUI by default | `false` |
+| `WEBUI_HOST` | WebUI listen address; Docker/cloud servers need `0.0.0.0` for external access | `127.0.0.1` |
+| `WEBUI_PORT` | WebUI listen port | `8000` |
+| `WEBUI_AUTO_BUILD` | Auto-build frontend before starting web service (npm install && npm run build) | `true` |
+
+### Portfolio Risk Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT` | Position concentration alert threshold (%) | `35.0` |
+| `PORTFOLIO_RISK_DRAWDOWN_ALERT_PCT` | Drawdown alert threshold (%) | `15.0` |
+| `PORTFOLIO_RISK_STOP_LOSS_ALERT_PCT` | Stop loss alert threshold (%) | `10.0` |
+| `PORTFOLIO_RISK_STOP_LOSS_NEAR_RATIO` | Stop loss proximity alert ratio (e.g., 0.8 = alert at 80% to stop loss) | `0.8` |
+| `PORTFOLIO_RISK_LOOKBACK_DAYS` | Risk calculation lookback days | `180` |
+| `PORTFOLIO_FX_UPDATE_ENABLED` | Enable FX rate updates | `true` |
+
+### Bot Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `BOT_ENABLED` | Start bot service | `false` |
+| `BOT_COMMAND_PREFIX` | Bot command prefix | `/` |
+| `BOT_RATE_LIMIT_REQUESTS` | Rate limit: max requests within time window | `10` |
+| `BOT_RATE_LIMIT_WINDOW` | Rate limit window (seconds) | `60` |
+| `BOT_ADMIN_USERS` | Bot admin user IDs (comma-separated) | - |
+
+### Cache & Circuit Breaker Configuration
+
+| Variable | Description | Default |
+|--------|------|--------|
+| `REALTIME_CACHE_TTL` | Real-time quote cache TTL (seconds) | `60` |
+| `CIRCUIT_BREAKER_COOLDOWN` | Circuit breaker cooldown time (seconds) | `60` |
 
 ---
 

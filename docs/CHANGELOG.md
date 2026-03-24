@@ -21,9 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 📡 **新增 AshareFetcher** — 腾讯财经 API 数据源，完全免费无需 API Key，支持 A 股实时行情和历史数据。
 - 🪙 **加密货币 API** — 新增 REST API 接口：实时行情、历史 K 线、热门币种、支持符号列表。支持 26+ 主流加密货币（BTC、ETH、SOL 等）。
 - 📊 **加密货币数据源池** — Hyperliquid → Bybit → Binance → QVeris 多数据源 fallback，无区域限制。
+- 🤖 **Multi-Agent 架构** — 新增多 Agent 级联编排模式，支持 Technical → Intel → Risk → Strategy → Decision 五阶段流水线，提供 quick/standard/full/strategy 四种编排深度。
+- 🧠 **Agent 记忆与校准系统** — 追踪历史分析准确率，自动调节置信度，支持按回测表现加权策略意见。
+- 🛡️ **Agent 风控否决** — 允许风控 Agent 否决买入信号，提升风险控制能力。
+- 📈 **回测系统增强** — 新增回测 API 端点、Web 界面入口、可配置评估窗口和中性区间阈值。
+- 📊 **Portfolio 风险管理** — 新增持仓集中度预警、回撤预警、止损预警等风控配置参数。
+- 🔌 **Bot 机器人服务** — 新增独立机器人服务配置，支持自定义命令前缀和频率限制。
 
 ### 变更
 
+- **GitHub Actions 默认并发数提升** — `MAX_WORKERS` 默认值从 `1` 改为 `3`，分析速度提升约 66%，避免长时间运行导致 workflow 超时
 - 新增配置项 `MAX_STOCKS_PER_WORKER`：每个并发最大处理股票数（默认 10）
 - 新增配置项 `SOURCE_SELECTION_MODE`：数据源选择模式（random/priority/round_robin，默认 random）
 - 新增配置项 `SOURCE_FAILURE_THRESHOLD`：连续失败次数触发冷却（默认 3）
@@ -33,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 新增配置项 `ENABLE_FREENEWS`：启用 FreeNewsAPI 免费新闻源（默认 true）
 - 新增配置项 `FINNHUB_API_KEYS`：Finnhub 金融新闻 API Key
 - 新增配置项 `MARKETAUX_API_KEYS`：MarketAux 金融新闻 API Key
+- 新增配置项 `AGENT_ARCH`：Agent 架构模式（single/multi，默认 single）
+- 新增配置项 `AGENT_ORCHESTRATOR_MODE`：编排模式（quick/standard/full/strategy）
+- 新增配置项 `AGENT_MEMORY_ENABLED`：启用记忆与校准系统
+- 新增配置项 `AGENT_STRATEGY_AUTOWEIGHT`：自动按回测表现加权策略意见
+- 新增配置项 `AGENT_RISK_OVERRIDE`：允许风控 Agent 否决买入信号
+- 新增配置项 `BACKTEST_ENABLED`：启用回测（默认 true）
+- 新增配置项 `BACKTEST_EVAL_WINDOW_DAYS`：回测评估窗口（默认 10）
+- 新增配置项 `BACKTEST_MIN_AGE_DAYS`：仅回测 N 天前的分析记录（默认 14）
+- 新增配置项 `PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT`：持仓集中度预警阈值（默认 35.0）
+- 新增配置项 `PORTFOLIO_RISK_DRAWDOWN_ALERT_PCT`：回撤预警阈值（默认 15.0）
+- 新增配置项 `WEBUI_HOST`：WebUI 监听地址（默认 127.0.0.1）
+- 新增配置项 `WEBUI_PORT`：WebUI 监听端口（默认 8000）
+- 新增配置项 `BOT_ENABLED`：启动机器人服务（默认 false）
+- 新增配置项 `BOT_COMMAND_PREFIX`：机器人命令前缀（默认 "/"）
 - `OPENAI_MODEL` 支持逗号分隔多个模型，如 `qwen-turbo,qwen-plus,qwen-max`
 - 数据源列表新增 `FinshareFetcher`、`AshareFetcher`（Priority 1），共 10+ 个数据源
 - 新闻搜索优先级调整：免费数据源（GNews、FreeNewsAPI）> 付费数据源 > 自建兜底

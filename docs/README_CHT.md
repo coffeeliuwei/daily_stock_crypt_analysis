@@ -26,15 +26,6 @@
 
 </div>
 
-## 💖 贊助商 (Sponsors)
-
-<div align="center">
-  <a href="https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis" target="_blank">
-    <img src="../sources/serpapi_banner_zh.png" alt="輕鬆抓取搜尋引擎上的即時金融新聞數據 - SerpApi" height="160">
-  </a>
-</div>
-<br>
-
 ## ✨ 功能特性
 
 | 模組 | 功能 | 說明 |
@@ -54,7 +45,9 @@
 |------|------|
 | AI 模型 | Gemini（免費）、OpenAI 兼容、DeepSeek、通義千問、Claude、Ollama |
 | 行情數據 | AkShare、Tushare、Pytdx、Baostock、YFinance |
+| **數據源池** | **9 個數據源池化管理，自動健康檢測，隨機選擇+互斥訪問+自動降級** |
 | 新聞搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
+| **免費新聞數據源** | **GNews（免費，無需 API Key）、FreeNewsAPI（100萬次/天）、Finnhub（60次/分鐘）、MarketAux（100次/天）** |
 
 ### 內建交易紀律
 

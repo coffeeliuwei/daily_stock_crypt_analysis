@@ -274,12 +274,92 @@ daily_stock_analysis/
 | `ADMIN_AUTH_ENABLED` | Web 登录：设为 `true` 启用密码保护；首次访问在网页设置初始密码，可在「系统设置 > 修改密码」修改；忘记密码执行 `python -m src.auth reset_password` | `false` |
 | `TRUST_X_FORWARDED_FOR` | 反向代理部署时设为 `true`，从 `X-Forwarded-For` 获取真实 IP（限流等）；直连公网时保持 `false` 防伪造 | `false` |
 | `MAX_WORKERS` | 并发线程数 | `3` |
+| `MAX_STOCKS_PER_WORKER` | 每个并发最大处理股票数；并发数 = ceil(股票数量 / 此值) | `10` |
 | `MARKET_REVIEW_ENABLED` | 启用大盘复盘 | `true` |
-| `MARKET_REVIEW_REGION` | 大盘复盘市场区域：cn(A股)、us(美股)、both(两者)，us 适合仅关注美股的用户 | `cn` |
+| `MARKET_REVIEW_REGION` | 大盘复盘市场区域：cn(A股)、us(美股)、both(两者)、crypto(加密货币)，us 适合仅关注美股的用户 | `cn` |
 | `TRADING_DAY_CHECK_ENABLED` | 交易日检查：默认 `true`，非交易日跳过执行；设为 `false` 或使用 `--force-run` 可强制执行（Issue #373） | `true` |
 | `SCHEDULE_ENABLED` | 启用定时任务 | `false` |
 | `SCHEDULE_TIME` | 定时执行时间 | `18:00` |
 | `LOG_DIR` | 日志目录 | `./logs` |
+| `LOG_LEVEL` | 日志级别（DEBUG/INFO/WARNING/ERROR） | `INFO` |
+
+### Agent 高级配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `AGENT_ARCH` | Agent 架构模式：`single`（默认，单 Agent）或 `multi`（多 Agent 编排） | `single` |
+| `AGENT_ORCHESTRATOR_MODE` | 多 Agent 编排模式（仅 `AGENT_ARCH=multi` 时有效）：`quick`（技术→决策，最快）、`standard`（技术→情报→决策）、`full`（技术→情报→风控→决策）、`strategy`（技术→情报→风控→策略评估→决策） | `standard` |
+| `AGENT_ORCHESTRATOR_TIMEOUT_S` | Multi-Agent 整体超时预算（秒，0 表示关闭） | `600` |
+| `AGENT_RISK_OVERRIDE` | 风控 Agent 是否可以否决买入信号 | `true` |
+| `AGENT_MEMORY_ENABLED` | 启用记忆与校准系统，追踪历史准确率并自动调节置信度 | `false` |
+| `AGENT_STRATEGY_AUTOWEIGHT` | 自动按回测表现加权策略意见 | `true` |
+| `AGENT_STRATEGY_ROUTING` | 策略路由模式：`auto`（根据市场状态自动选择）或 `manual`（使用 `AGENT_SKILLS` 列表） | `auto` |
+
+### 数据源优先级配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `EFINANCE_PRIORITY` | Efinance 数据源优先级（数字越小优先级越高） | `0` |
+| `EFINANCE_CALL_TIMEOUT` | Efinance API 调用超时（秒），防止东财服务不可达时无限等待 | `30` |
+| `AKSHARE_PRIORITY` | AkShare 数据源优先级 | `1` |
+| `TUSHARE_PRIORITY` | Tushare Pro 数据源优先级 | `2` |
+| `PYTDX_PRIORITY` | 通达信数据源优先级 | `2` |
+| `PYTDX_HOST` | 通达信自定义服务器地址（内网部署） | - |
+| `PYTDX_PORT` | 通达信自定义服务器端口 | `7709` |
+| `PYTDX_SERVERS` | 通达信多服务器配置（格式：`ip1:port1,ip2:port2`） | - |
+| `BAOSTOCK_PRIORITY` | Baostock 数据源优先级 | `3` |
+| `YFINANCE_PRIORITY` | Yahoo Finance 数据源优先级（美股推荐设为 0） | `4` |
+
+### 数据源池配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `SOURCE_SELECTION_MODE` | 数据源选择模式：`random`（随机，推荐）、`priority`（按优先级）、`round_robin`（轮询） | `random` |
+| `SOURCE_FAILURE_THRESHOLD` | 连续失败多少次后触发冷却 | `3` |
+| `SOURCE_COOLDOWN_SECONDS` | 数据源冷却时间（秒） | `300` |
+
+### 模型池配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `MODEL_SELECTION_MODE` | 模型选择模式：`random`（随机，推荐）、`sequential`（顺序）、`least_latency`（最低延迟） | `random` |
+
+### WebUI 配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `WEBUI_ENABLED` | 是否默认启动 WebUI | `false` |
+| `WEBUI_HOST` | WebUI 监听地址；Docker/云服务器需设为 `0.0.0.0` 才能外网访问 | `127.0.0.1` |
+| `WEBUI_PORT` | WebUI 监听端口 | `8000` |
+| `WEBUI_AUTO_BUILD` | 启动 Web 服务前是否自动构建前端（npm install && npm run build） | `true` |
+
+### Portfolio 风险配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT` | 持仓集中度预警阈值（%） | `35.0` |
+| `PORTFOLIO_RISK_DRAWDOWN_ALERT_PCT` | 回撤预警阈值（%） | `15.0` |
+| `PORTFOLIO_RISK_STOP_LOSS_ALERT_PCT` | 止损预警阈值（%） | `10.0` |
+| `PORTFOLIO_RISK_STOP_LOSS_NEAR_RATIO` | 止损接近预警比例（如 0.8 表示距离止损 80% 时预警） | `0.8` |
+| `PORTFOLIO_RISK_LOOKBACK_DAYS` | 风险计算回看天数 | `180` |
+| `PORTFOLIO_FX_UPDATE_ENABLED` | 启用汇率更新 | `true` |
+
+### Bot 机器人配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `BOT_ENABLED` | 启动机器人服务 | `false` |
+| `BOT_COMMAND_PREFIX` | 机器人命令前缀 | `/` |
+| `BOT_RATE_LIMIT_REQUESTS` | 频率限制：时间窗口内最大请求数 | `10` |
+| `BOT_RATE_LIMIT_WINDOW` | 频率限制窗口（秒） | `60` |
+| `BOT_ADMIN_USERS` | 机器人管理员用户 ID 列表（逗号分隔） | - |
+
+### 缓存与熔断配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `REALTIME_CACHE_TTL` | 实时行情缓存时间（秒） | `60` |
+| `CIRCUIT_BREAKER_COOLDOWN` | 熔断器冷却时间（秒） | `60` |
 
 ---
 
