@@ -11,6 +11,7 @@ A股自选股智能分析系统 - 分析服务层
 4. 统一管理分析流程和配置
 """
 
+import logging
 import uuid
 from typing import List, Optional
 
@@ -21,114 +22,125 @@ from src.enums import ReportType
 from src.core.pipeline import StockAnalysisPipeline
 from src.core.market_review import run_market_review
 
+logger = logging.getLogger(__name__)
 
 
 def analyze_stock(
     stock_code: str,
     config: Config = None,
     full_report: bool = False,
-    notifier: Optional[NotificationService] = None
+    notifier: Optional[NotificationService] = None,
 ) -> Optional[AnalysisResult]:
     """
     分析单只股票
-    
+
     Args:
         stock_code: 股票代码
         config: 配置对象（可选，默认使用单例）
         full_report: 是否生成完整报告
         notifier: 通知服务（可选）
-        
+
     Returns:
         分析结果对象
     """
     if config is None:
         config = get_config()
-    
+
     # 创建分析流水线
     pipeline = StockAnalysisPipeline(
-        config=config,
-        query_id=uuid.uuid4().hex,
-        query_source="cli"
+        config=config, query_id=uuid.uuid4().hex, query_source="cli"
     )
-    
+
     # 使用通知服务（如果提供）
     if notifier:
         pipeline.notifier = notifier
-    
+
     # 根据full_report参数设置报告类型
     report_type = ReportType.FULL if full_report else ReportType.SIMPLE
-    
+
     # 运行单只股票分析
     result = pipeline.process_single_stock(
         code=stock_code,
         skip_analysis=False,
         single_stock_notify=notifier is not None,
-        report_type=report_type
+        report_type=report_type,
     )
-    
+
     return result
+
 
 def analyze_stocks(
     stock_codes: List[str],
     config: Config = None,
     full_report: bool = False,
-    notifier: Optional[NotificationService] = None
+    notifier: Optional[NotificationService] = None,
+    continue_on_error: bool = True,
 ) -> List[AnalysisResult]:
     """
     分析多只股票
-    
+
     Args:
         stock_codes: 股票代码列表
         config: 配置对象（可选，默认使用单例）
         full_report: 是否生成完整报告
         notifier: 通知服务（可选）
-        
+        continue_on_error: 单股分析失败时是否继续处理其他股票（默认 True）
+
     Returns:
-        分析结果列表
+        分析结果列表（仅包含成功的分析结果）
     """
     if config is None:
         config = get_config()
-    
+
     results = []
+    failed_codes = []
+
     for stock_code in stock_codes:
-        result = analyze_stock(stock_code, config, full_report, notifier)
-        if result:
-            results.append(result)
-    
+        try:
+            result = analyze_stock(stock_code, config, full_report, notifier)
+            if result:
+                results.append(result)
+        except Exception as e:
+            logger.exception(f"分析股票 {stock_code} 失败: {e}")
+            failed_codes.append(stock_code)
+            if not continue_on_error:
+                raise
+
+    if failed_codes:
+        logger.warning(
+            f"共 {len(stock_codes)} 只股票，成功 {len(results)} 只，失败 {len(failed_codes)} 只: {failed_codes}"
+        )
+
     return results
 
+
 def perform_market_review(
-    config: Config = None,
-    notifier: Optional[NotificationService] = None
+    config: Config = None, notifier: Optional[NotificationService] = None
 ) -> Optional[str]:
     """
     执行大盘复盘
-    
+
     Args:
         config: 配置对象（可选，默认使用单例）
         notifier: 通知服务（可选）
-        
+
     Returns:
         复盘报告内容
     """
     if config is None:
         config = get_config()
-    
+
     # 创建分析流水线以获取analyzer和search_service
     pipeline = StockAnalysisPipeline(
-        config=config,
-        query_id=uuid.uuid4().hex,
-        query_source="cli"
+        config=config, query_id=uuid.uuid4().hex, query_source="cli"
     )
-    
+
     # 使用提供的通知服务或创建新的
     review_notifier = notifier or pipeline.notifier
-    
+
     # 调用大盘复盘函数
     return run_market_review(
         notifier=review_notifier,
         analyzer=pipeline.analyzer,
-        search_service=pipeline.search_service
+        search_service=pipeline.search_service,
     )
-
-
