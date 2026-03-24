@@ -40,7 +40,7 @@ numpy>=1.24.0               # 数值计算
 json-repair>=0.55.1         # JSON 修复
 
 # AI 分析
-litellm>=1.79.0            # Unified LLM client (Gemini/Anthropic/OpenAI/DeepSeek etc.)
+litellm @ git+https://github.com/BerriAI/litellm.git  # Unified LLM client (PyPI quarantine workaround)
 tiktoken>=0.8.0,<0.12.0    # BPE tokenizer for LLM token counting (pin <0.12 to avoid plugin registration issues, #537)
 openai>=1.0.0               # OpenAI SDK (transitive dependency of litellm, kept explicit)
 PyYAML>=6.0                 # YAML parser for LITELLM_CONFIG support
