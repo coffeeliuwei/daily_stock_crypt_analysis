@@ -40,6 +40,8 @@ from sqlalchemy import (
     delete,
     desc,
     func,
+    insert,
+    update,
 )
 from sqlalchemy.orm import (
     declarative_base,
@@ -61,74 +63,76 @@ if TYPE_CHECKING:
 
 # === 数据模型定义 ===
 
+
 class StockDaily(Base):
     """
     股票日线数据模型
-    
+
     存储每日行情数据和计算的技术指标
     支持多股票、多日期的唯一约束
     """
-    __tablename__ = 'stock_daily'
-    
+
+    __tablename__ = "stock_daily"
+
     # 主键
     id = Column(Integer, primary_key=True, autoincrement=True)
-    
+
     # 股票代码（如 600519, 000001）
     code = Column(String(10), nullable=False, index=True)
-    
+
     # 交易日期
     date = Column(Date, nullable=False, index=True)
-    
+
     # OHLC 数据
     open = Column(Float)
     high = Column(Float)
     low = Column(Float)
     close = Column(Float)
-    
+
     # 成交数据
     volume = Column(Float)  # 成交量（股）
     amount = Column(Float)  # 成交额（元）
     pct_chg = Column(Float)  # 涨跌幅（%）
-    
+
     # 技术指标
     ma5 = Column(Float)
     ma10 = Column(Float)
     ma20 = Column(Float)
     volume_ratio = Column(Float)  # 量比
-    
+
     # 数据来源
     data_source = Column(String(50))  # 记录数据来源（如 AkshareFetcher）
-    
+
     # 更新时间
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-    
+
     # 唯一约束：同一股票同一日期只能有一条数据
     __table_args__ = (
-        UniqueConstraint('code', 'date', name='uix_code_date'),
-        Index('ix_code_date', 'code', 'date'),
+        UniqueConstraint("code", "date", name="uix_code_date"),
+        Index("ix_code_date", "code", "date"),
     )
-    
+
     def __repr__(self):
         return f"<StockDaily(code={self.code}, date={self.date}, close={self.close})>"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
-            'code': self.code,
-            'date': self.date,
-            'open': self.open,
-            'high': self.high,
-            'low': self.low,
-            'close': self.close,
-            'volume': self.volume,
-            'amount': self.amount,
-            'pct_chg': self.pct_chg,
-            'ma5': self.ma5,
-            'ma10': self.ma10,
-            'ma20': self.ma20,
-            'volume_ratio': self.volume_ratio,
-            'data_source': self.data_source,
+            "code": self.code,
+            "date": self.date,
+            "open": self.open,
+            "high": self.high,
+            "low": self.low,
+            "close": self.close,
+            "volume": self.volume,
+            "amount": self.amount,
+            "pct_chg": self.pct_chg,
+            "ma5": self.ma5,
+            "ma10": self.ma10,
+            "ma20": self.ma20,
+            "volume_ratio": self.volume_ratio,
+            "data_source": self.data_source,
         }
 
 
@@ -138,7 +142,8 @@ class NewsIntel(Base):
 
     存储搜索到的新闻情报条目，用于后续分析与查询
     """
-    __tablename__ = 'news_intel'
+
+    __tablename__ = "news_intel"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
@@ -150,7 +155,9 @@ class NewsIntel(Base):
     name = Column(String(50))
 
     # 搜索上下文
-    dimension = Column(String(32), index=True)  # latest_news / risk_check / earnings / market_analysis / industry
+    dimension = Column(
+        String(32), index=True
+    )  # latest_news / risk_check / earnings / market_analysis / industry
     query = Column(String(255))
     provider = Column(String(32), index=True)
 
@@ -172,8 +179,8 @@ class NewsIntel(Base):
     requester_query = Column(String(255))
 
     __table_args__ = (
-        UniqueConstraint('url', name='uix_news_url'),
-        Index('ix_news_code_pub', 'code', 'published_date'),
+        UniqueConstraint("url", name="uix_news_url"),
+        Index("ix_news_code_pub", "code", "published_date"),
     )
 
     def __repr__(self) -> str:
@@ -186,7 +193,8 @@ class FundamentalSnapshot(Base):
 
     仅用于写入，主链路不依赖读取该表，便于后续回测/画像扩展。
     """
-    __tablename__ = 'fundamental_snapshot'
+
+    __tablename__ = "fundamental_snapshot"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     query_id = Column(String(64), nullable=False, index=True)
@@ -197,8 +205,8 @@ class FundamentalSnapshot(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
-        Index('ix_fundamental_snapshot_query_code', 'query_id', 'code'),
-        Index('ix_fundamental_snapshot_created', 'created_at'),
+        Index("ix_fundamental_snapshot_query_code", "query_id", "code"),
+        Index("ix_fundamental_snapshot_created", "created_at"),
     )
 
     def __repr__(self) -> str:
@@ -211,7 +219,8 @@ class AnalysisHistory(Base):
 
     保存每次分析结果，支持按 query_id/股票代码检索
     """
-    __tablename__ = 'analysis_history'
+
+    __tablename__ = "analysis_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
@@ -242,43 +251,41 @@ class AnalysisHistory(Base):
 
     created_at = Column(DateTime, default=datetime.now, index=True)
 
-    __table_args__ = (
-        Index('ix_analysis_code_time', 'code', 'created_at'),
-    )
+    __table_args__ = (Index("ix_analysis_code_time", "code", "created_at"),)
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
-            'id': self.id,
-            'query_id': self.query_id,
-            'code': self.code,
-            'name': self.name,
-            'report_type': self.report_type,
-            'sentiment_score': self.sentiment_score,
-            'operation_advice': self.operation_advice,
-            'trend_prediction': self.trend_prediction,
-            'analysis_summary': self.analysis_summary,
-            'raw_result': self.raw_result,
-            'news_content': self.news_content,
-            'context_snapshot': self.context_snapshot,
-            'ideal_buy': self.ideal_buy,
-            'secondary_buy': self.secondary_buy,
-            'stop_loss': self.stop_loss,
-            'take_profit': self.take_profit,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
+            "id": self.id,
+            "query_id": self.query_id,
+            "code": self.code,
+            "name": self.name,
+            "report_type": self.report_type,
+            "sentiment_score": self.sentiment_score,
+            "operation_advice": self.operation_advice,
+            "trend_prediction": self.trend_prediction,
+            "analysis_summary": self.analysis_summary,
+            "raw_result": self.raw_result,
+            "news_content": self.news_content,
+            "context_snapshot": self.context_snapshot,
+            "ideal_buy": self.ideal_buy,
+            "secondary_buy": self.secondary_buy,
+            "stop_loss": self.stop_loss,
+            "take_profit": self.take_profit,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
 class BacktestResult(Base):
     """单条分析记录的回测结果。"""
 
-    __tablename__ = 'backtest_results'
+    __tablename__ = "backtest_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     analysis_history_id = Column(
         Integer,
-        ForeignKey('analysis_history.id'),
+        ForeignKey("analysis_history.id"),
         nullable=False,
         index=True,
     )
@@ -289,10 +296,10 @@ class BacktestResult(Base):
 
     # 回测参数
     eval_window_days = Column(Integer, nullable=False, default=10)
-    engine_version = Column(String(16), nullable=False, default='v1')
+    engine_version = Column(String(16), nullable=False, default="v1")
 
     # 状态
-    eval_status = Column(String(16), nullable=False, default='pending')
+    eval_status = Column(String(16), nullable=False, default="pending")
     evaluated_at = Column(DateTime, default=datetime.now, index=True)
 
     # 建议快照（避免未来分析字段变化导致回测不可解释）
@@ -316,31 +323,35 @@ class BacktestResult(Base):
     take_profit = Column(Float)
     hit_stop_loss = Column(Boolean)
     hit_take_profit = Column(Boolean)
-    first_hit = Column(String(16))  # take_profit/stop_loss/ambiguous/neither/not_applicable
+    first_hit = Column(
+        String(16)
+    )  # take_profit/stop_loss/ambiguous/neither/not_applicable
     first_hit_date = Column(Date)
     first_hit_trading_days = Column(Integer)
 
     # 模拟执行（long-only）
     simulated_entry_price = Column(Float)
     simulated_exit_price = Column(Float)
-    simulated_exit_reason = Column(String(24))  # stop_loss/take_profit/window_end/cash/ambiguous_stop_loss
+    simulated_exit_reason = Column(
+        String(24)
+    )  # stop_loss/take_profit/window_end/cash/ambiguous_stop_loss
     simulated_return_pct = Column(Float)
 
     __table_args__ = (
         UniqueConstraint(
-            'analysis_history_id',
-            'eval_window_days',
-            'engine_version',
-            name='uix_backtest_analysis_window_version',
+            "analysis_history_id",
+            "eval_window_days",
+            "engine_version",
+            name="uix_backtest_analysis_window_version",
         ),
-        Index('ix_backtest_code_date', 'code', 'analysis_date'),
+        Index("ix_backtest_code_date", "code", "analysis_date"),
     )
 
 
 class BacktestSummary(Base):
     """回测汇总指标（按股票或全局）。"""
 
-    __tablename__ = 'backtest_summaries'
+    __tablename__ = "backtest_summaries"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
@@ -348,7 +359,7 @@ class BacktestSummary(Base):
     code = Column(String(16), index=True)
 
     eval_window_days = Column(Integer, nullable=False, default=10)
-    engine_version = Column(String(16), nullable=False, default='v1')
+    engine_version = Column(String(16), nullable=False, default="v1")
     computed_at = Column(DateTime, default=datetime.now, index=True)
 
     # 计数
@@ -383,11 +394,11 @@ class BacktestSummary(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            'scope',
-            'code',
-            'eval_window_days',
-            'engine_version',
-            name='uix_backtest_summary_scope_code_window_version',
+            "scope",
+            "code",
+            "eval_window_days",
+            "engine_version",
+            name="uix_backtest_summary_scope_code_window_version",
         ),
     )
 
@@ -395,34 +406,36 @@ class BacktestSummary(Base):
 class PortfolioAccount(Base):
     """Portfolio account metadata."""
 
-    __tablename__ = 'portfolio_accounts'
+    __tablename__ = "portfolio_accounts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     owner_id = Column(String(64), index=True)
     name = Column(String(64), nullable=False)
     broker = Column(String(64))
-    market = Column(String(8), nullable=False, default='cn', index=True)  # cn/hk/us
-    base_currency = Column(String(8), nullable=False, default='CNY')
+    market = Column(String(8), nullable=False, default="cn", index=True)  # cn/hk/us
+    base_currency = Column(String(8), nullable=False, default="CNY")
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     __table_args__ = (
-        Index('ix_portfolio_account_owner_active', 'owner_id', 'is_active'),
+        Index("ix_portfolio_account_owner_active", "owner_id", "is_active"),
     )
 
 
 class PortfolioTrade(Base):
     """Executed trade events used as the source of truth for replay."""
 
-    __tablename__ = 'portfolio_trades'
+    __tablename__ = "portfolio_trades"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    account_id = Column(
+        Integer, ForeignKey("portfolio_accounts.id"), nullable=False, index=True
+    )
     trade_uid = Column(String(128))
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
-    currency = Column(String(8), nullable=False, default='CNY')
+    market = Column(String(8), nullable=False, default="cn")
+    currency = Column(String(8), nullable=False, default="CNY")
     trade_date = Column(Date, nullable=False, index=True)
     side = Column(String(8), nullable=False)  # buy/sell
     quantity = Column(Float, nullable=False)
@@ -434,41 +447,47 @@ class PortfolioTrade(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
-        UniqueConstraint('account_id', 'trade_uid', name='uix_portfolio_trade_uid'),
-        UniqueConstraint('account_id', 'dedup_hash', name='uix_portfolio_trade_dedup_hash'),
-        Index('ix_portfolio_trade_account_date', 'account_id', 'trade_date'),
+        UniqueConstraint("account_id", "trade_uid", name="uix_portfolio_trade_uid"),
+        UniqueConstraint(
+            "account_id", "dedup_hash", name="uix_portfolio_trade_dedup_hash"
+        ),
+        Index("ix_portfolio_trade_account_date", "account_id", "trade_date"),
     )
 
 
 class PortfolioCashLedger(Base):
     """Cash in/out events."""
 
-    __tablename__ = 'portfolio_cash_ledger'
+    __tablename__ = "portfolio_cash_ledger"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    account_id = Column(
+        Integer, ForeignKey("portfolio_accounts.id"), nullable=False, index=True
+    )
     event_date = Column(Date, nullable=False, index=True)
     direction = Column(String(8), nullable=False)  # in/out
     amount = Column(Float, nullable=False)
-    currency = Column(String(8), nullable=False, default='CNY')
+    currency = Column(String(8), nullable=False, default="CNY")
     note = Column(String(255))
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
-        Index('ix_portfolio_cash_account_date', 'account_id', 'event_date'),
+        Index("ix_portfolio_cash_account_date", "account_id", "event_date"),
     )
 
 
 class PortfolioCorporateAction(Base):
     """Corporate actions that impact cash or share quantity."""
 
-    __tablename__ = 'portfolio_corporate_actions'
+    __tablename__ = "portfolio_corporate_actions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    account_id = Column(
+        Integer, ForeignKey("portfolio_accounts.id"), nullable=False, index=True
+    )
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
-    currency = Column(String(8), nullable=False, default='CNY')
+    market = Column(String(8), nullable=False, default="cn")
+    currency = Column(String(8), nullable=False, default="CNY")
     effective_date = Column(Date, nullable=False, index=True)
     action_type = Column(String(24), nullable=False)  # cash_dividend/split_adjustment
     cash_dividend_per_share = Column(Float)
@@ -477,38 +496,42 @@ class PortfolioCorporateAction(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
-        Index('ix_portfolio_ca_account_date', 'account_id', 'effective_date'),
+        Index("ix_portfolio_ca_account_date", "account_id", "effective_date"),
     )
 
 
 class PortfolioPosition(Base):
     """Latest replayed position snapshot for each symbol in one account."""
 
-    __tablename__ = 'portfolio_positions'
+    __tablename__ = "portfolio_positions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
-    cost_method = Column(String(8), nullable=False, default='fifo')
+    account_id = Column(
+        Integer, ForeignKey("portfolio_accounts.id"), nullable=False, index=True
+    )
+    cost_method = Column(String(8), nullable=False, default="fifo")
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
-    currency = Column(String(8), nullable=False, default='CNY')
+    market = Column(String(8), nullable=False, default="cn")
+    currency = Column(String(8), nullable=False, default="CNY")
     quantity = Column(Float, nullable=False, default=0.0)
     avg_cost = Column(Float, nullable=False, default=0.0)
     total_cost = Column(Float, nullable=False, default=0.0)
     last_price = Column(Float, nullable=False, default=0.0)
     market_value_base = Column(Float, nullable=False, default=0.0)
     unrealized_pnl_base = Column(Float, nullable=False, default=0.0)
-    valuation_currency = Column(String(8), nullable=False, default='CNY')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+    valuation_currency = Column(String(8), nullable=False, default="CNY")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, index=True
+    )
 
     __table_args__ = (
         UniqueConstraint(
-            'account_id',
-            'symbol',
-            'market',
-            'currency',
-            'cost_method',
-            name='uix_portfolio_position_account_symbol_market_currency',
+            "account_id",
+            "symbol",
+            "market",
+            "currency",
+            "cost_method",
+            name="uix_portfolio_position_account_symbol_market_currency",
         ),
     )
 
@@ -516,35 +539,39 @@ class PortfolioPosition(Base):
 class PortfolioPositionLot(Base):
     """Lot-level remaining quantities used by FIFO replay."""
 
-    __tablename__ = 'portfolio_position_lots'
+    __tablename__ = "portfolio_position_lots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
-    cost_method = Column(String(8), nullable=False, default='fifo')
+    account_id = Column(
+        Integer, ForeignKey("portfolio_accounts.id"), nullable=False, index=True
+    )
+    cost_method = Column(String(8), nullable=False, default="fifo")
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
-    currency = Column(String(8), nullable=False, default='CNY')
+    market = Column(String(8), nullable=False, default="cn")
+    currency = Column(String(8), nullable=False, default="CNY")
     open_date = Column(Date, nullable=False, index=True)
     remaining_quantity = Column(Float, nullable=False, default=0.0)
     unit_cost = Column(Float, nullable=False, default=0.0)
-    source_trade_id = Column(Integer, ForeignKey('portfolio_trades.id'))
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
-
-    __table_args__ = (
-        Index('ix_portfolio_lot_account_symbol', 'account_id', 'symbol'),
+    source_trade_id = Column(Integer, ForeignKey("portfolio_trades.id"))
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, index=True
     )
+
+    __table_args__ = (Index("ix_portfolio_lot_account_symbol", "account_id", "symbol"),)
 
 
 class PortfolioDailySnapshot(Base):
     """Daily account snapshot generated by read-time replay."""
 
-    __tablename__ = 'portfolio_daily_snapshots'
+    __tablename__ = "portfolio_daily_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    account_id = Column(
+        Integer, ForeignKey("portfolio_accounts.id"), nullable=False, index=True
+    )
     snapshot_date = Column(Date, nullable=False, index=True)
-    cost_method = Column(String(8), nullable=False, default='fifo')  # fifo/avg
-    base_currency = Column(String(8), nullable=False, default='CNY')
+    cost_method = Column(String(8), nullable=False, default="fifo")  # fifo/avg
+    base_currency = Column(String(8), nullable=False, default="CNY")
     total_cash = Column(Float, nullable=False, default=0.0)
     total_market_value = Column(Float, nullable=False, default=0.0)
     total_equity = Column(Float, nullable=False, default=0.0)
@@ -559,10 +586,10 @@ class PortfolioDailySnapshot(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            'account_id',
-            'snapshot_date',
-            'cost_method',
-            name='uix_portfolio_snapshot_account_date_method',
+            "account_id",
+            "snapshot_date",
+            "cost_method",
+            name="uix_portfolio_snapshot_account_date_method",
         ),
     )
 
@@ -570,23 +597,23 @@ class PortfolioDailySnapshot(Base):
 class PortfolioFxRate(Base):
     """Cached FX rates used for cross-currency portfolio conversion."""
 
-    __tablename__ = 'portfolio_fx_rates'
+    __tablename__ = "portfolio_fx_rates"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     from_currency = Column(String(8), nullable=False, index=True)
     to_currency = Column(String(8), nullable=False, index=True)
     rate_date = Column(Date, nullable=False, index=True)
     rate = Column(Float, nullable=False)
-    source = Column(String(32), nullable=False, default='manual')
+    source = Column(String(32), nullable=False, default="manual")
     is_stale = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     __table_args__ = (
         UniqueConstraint(
-            'from_currency',
-            'to_currency',
-            'rate_date',
-            name='uix_portfolio_fx_pair_date',
+            "from_currency",
+            "to_currency",
+            "rate_date",
+            name="uix_portfolio_fx_pair_date",
         ),
     )
 
@@ -595,7 +622,8 @@ class ConversationMessage(Base):
     """
     Agent 对话历史记录表
     """
-    __tablename__ = 'conversation_messages'
+
+    __tablename__ = "conversation_messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(100), index=True, nullable=False)
@@ -607,7 +635,7 @@ class ConversationMessage(Base):
 class LLMUsage(Base):
     """One row per litellm.completion() call — token-usage audit log."""
 
-    __tablename__ = 'llm_usage'
+    __tablename__ = "llm_usage"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     # 'analysis' | 'agent' | 'market_review'
@@ -623,51 +651,51 @@ class LLMUsage(Base):
 class DatabaseManager:
     """
     数据库管理器 - 单例模式
-    
+
     职责：
     1. 管理数据库连接池
     2. 提供 Session 上下文管理
     3. 封装数据存取操作
     """
-    
-    _instance: Optional['DatabaseManager'] = None
+
+    _instance: Optional["DatabaseManager"] = None
     _initialized: bool = False
-    
+
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self, db_url: Optional[str] = None):
         """
         初始化数据库管理器
-        
+
         Args:
             db_url: 数据库连接 URL（可选，默认从配置读取）
         """
-        if getattr(self, '_initialized', False):
+        if getattr(self, "_initialized", False):
             return
-        
+
         if db_url is None:
             config = get_config()
             db_url = config.get_db_url()
-        
+
         # 创建数据库引擎
         self._engine = create_engine(
             db_url,
             echo=False,  # 设为 True 可查看 SQL 语句
             pool_pre_ping=True,  # 连接健康检查
         )
-        
+
         # 创建 Session 工厂
         self._SessionLocal = sessionmaker(
             bind=self._engine,
             autocommit=False,
             autoflush=False,
         )
-        
+
         # 创建所有表
         Base.metadata.create_all(self._engine)
 
@@ -676,19 +704,19 @@ class DatabaseManager:
 
         # 注册退出钩子，确保程序退出时关闭数据库连接
         atexit.register(DatabaseManager._cleanup_engine, self._engine)
-    
+
     @classmethod
-    def get_instance(cls) -> 'DatabaseManager':
+    def get_instance(cls) -> "DatabaseManager":
         """获取单例实例"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-    
+
     @classmethod
     def reset_instance(cls) -> None:
         """重置单例（用于测试）"""
         if cls._instance is not None:
-            if hasattr(cls._instance, '_engine') and cls._instance._engine is not None:
+            if hasattr(cls._instance, "_engine") and cls._instance._engine is not None:
                 cls._instance._engine.dispose()
             cls._instance._initialized = False
             cls._instance = None
@@ -709,17 +737,19 @@ class DatabaseManager:
                 logger.debug("数据库引擎已清理")
         except Exception as e:
             logger.warning(f"清理数据库引擎时出错: {e}")
-    
+
     def get_session(self) -> Session:
         """
         获取数据库 Session
-        
+
         使用示例:
             with db.get_session() as session:
                 # 执行查询
                 session.commit()  # 如果需要
         """
-        if not getattr(self, '_initialized', False) or not hasattr(self, '_SessionLocal'):
+        if not getattr(self, "_initialized", False) or not hasattr(
+            self, "_SessionLocal"
+        ):
             raise RuntimeError(
                 "DatabaseManager 未正确初始化。"
                 "请确保通过 DatabaseManager.get_instance() 获取实例。"
@@ -743,17 +773,17 @@ class DatabaseManager:
             raise
         finally:
             session.close()
-    
+
     def has_today_data(self, code: str, target_date: Optional[date] = None) -> bool:
         """
         检查是否已有指定日期的数据
-        
+
         用于断点续传逻辑：如果已有数据则跳过网络请求
-        
+
         Args:
             code: 股票代码
             target_date: 目标日期（默认今天）
-            
+
         Returns:
             是否存在数据
         """
@@ -762,44 +792,41 @@ class DatabaseManager:
         # 注意：这里的 target_date 语义是“自然日”，而不是“最新交易日”。
         # 在周末/节假日/非交易日运行时，即使数据库已有最新交易日数据，这里也会返回 False。
         # 该行为目前保留（按需求不改逻辑）。
-        
+
         with self.get_session() as session:
             result = session.execute(
                 select(StockDaily).where(
-                    and_(
-                        StockDaily.code == code,
-                        StockDaily.date == target_date
-                    )
+                    and_(StockDaily.code == code, StockDaily.date == target_date)
                 )
             ).scalar_one_or_none()
-            
+
             return result is not None
-    
-    def get_latest_data(
-        self, 
-        code: str, 
-        days: int = 2
-    ) -> List[StockDaily]:
+
+    def get_latest_data(self, code: str, days: int = 2) -> List[StockDaily]:
         """
         获取最近 N 天的数据
-        
+
         用于计算"相比昨日"的变化
-        
+
         Args:
             code: 股票代码
             days: 获取天数
-            
+
         Returns:
             StockDaily 对象列表（按日期降序）
         """
         with self.get_session() as session:
-            results = session.execute(
-                select(StockDaily)
-                .where(StockDaily.code == code)
-                .order_by(desc(StockDaily.date))
-                .limit(days)
-            ).scalars().all()
-            
+            results = (
+                session.execute(
+                    select(StockDaily)
+                    .where(StockDaily.code == code)
+                    .order_by(desc(StockDaily.date))
+                    .limit(days)
+                )
+                .scalars()
+                .all()
+            )
+
             return list(results)
 
     def save_news_intel(
@@ -808,11 +835,16 @@ class DatabaseManager:
         name: str,
         dimension: str,
         query: str,
-        response: 'SearchResponse',
-        query_context: Optional[Dict[str, str]] = None
+        response: "SearchResponse",
+        query_context: Optional[Dict[str, str]] = None,
     ) -> int:
         """
         保存新闻情报到数据库
+
+        性能优化版本：
+        - 批量查询已存在的 URL（避免 N+1 SELECT）
+        - 批量插入新记录（减少 SQL 执行次数）
+        - N 条新闻：原 N+1 次查询 → 1 次批量查询 + 批量插入
 
         去重策略：
         - 优先按 URL 去重（唯一约束）
@@ -824,99 +856,161 @@ class DatabaseManager:
         if not response or not response.results:
             return 0
 
-        saved_count = 0
         query_ctx = query_context or {}
         current_query_id = (query_ctx.get("query_id") or "").strip()
 
+        # 预处理：收集所有需要处理的新闻项
+        items_to_process = []
+        url_keys = []
+
+        for item in response.results:
+            title = (item.title or "").strip()
+            url = (item.url or "").strip()
+            source = (item.source or "").strip()
+            snippet = (item.snippet or "").strip()
+            published_date = self._parse_published_date(item.published_date)
+
+            if not title and not url:
+                continue
+
+            url_key = url or self._build_fallback_url_key(
+                code=code,
+                title=title,
+                source=source,
+                published_date=published_date,
+            )
+
+            items_to_process.append(
+                {
+                    "title": title,
+                    "url_key": url_key,
+                    "source": source,
+                    "snippet": snippet,
+                    "published_date": published_date,
+                }
+            )
+            url_keys.append(url_key)
+
+        if not items_to_process:
+            return 0
+
+        saved_count = 0
+
         with self.get_session() as session:
             try:
-                for item in response.results:
-                    title = (item.title or '').strip()
-                    url = (item.url or '').strip()
-                    source = (item.source or '').strip()
-                    snippet = (item.snippet or '').strip()
-                    published_date = self._parse_published_date(item.published_date)
-
-                    if not title and not url:
-                        continue
-
-                    url_key = url or self._build_fallback_url_key(
-                        code=code,
-                        title=title,
-                        source=source,
-                        published_date=published_date
+                # 批量查询已存在的 URL（一次查询替代 N 次）
+                existing_records = (
+                    session.execute(
+                        select(NewsIntel).where(NewsIntel.url.in_(url_keys))
                     )
+                    .scalars()
+                    .all()
+                )
 
-                    # 优先按 URL 或兜底键去重
-                    existing = session.execute(
-                        select(NewsIntel).where(NewsIntel.url == url_key)
-                    ).scalar_one_or_none()
+                # 构建已存在记录的字典 {url: record}
+                existing_map = {r.url: r for r in existing_records}
+
+                # 分离：需要更新的 vs 需要插入的
+                new_records = []
+
+                for item_data in items_to_process:
+                    url_key = item_data["url_key"]
+                    existing = existing_map.get(url_key)
 
                     if existing:
+                        # 更新现有记录（保持原有的部分更新逻辑）
                         existing.name = name or existing.name
                         existing.dimension = dimension or existing.dimension
                         existing.query = query or existing.query
                         existing.provider = response.provider or existing.provider
-                        existing.snippet = snippet or existing.snippet
-                        existing.source = source or existing.source
-                        existing.published_date = published_date or existing.published_date
+                        existing.snippet = item_data["snippet"] or existing.snippet
+                        existing.source = item_data["source"] or existing.source
+                        existing.published_date = (
+                            item_data["published_date"] or existing.published_date
+                        )
                         existing.fetched_at = datetime.now()
 
                         if query_context:
-                            # Keep the first query_id to avoid overwriting historical links.
                             if not existing.query_id and current_query_id:
                                 existing.query_id = current_query_id
                             existing.query_source = (
-                                query_context.get("query_source") or existing.query_source
+                                query_context.get("query_source")
+                                or existing.query_source
                             )
                             existing.requester_platform = (
-                                query_context.get("requester_platform") or existing.requester_platform
+                                query_context.get("requester_platform")
+                                or existing.requester_platform
                             )
                             existing.requester_user_id = (
-                                query_context.get("requester_user_id") or existing.requester_user_id
+                                query_context.get("requester_user_id")
+                                or existing.requester_user_id
                             )
                             existing.requester_user_name = (
-                                query_context.get("requester_user_name") or existing.requester_user_name
+                                query_context.get("requester_user_name")
+                                or existing.requester_user_name
                             )
                             existing.requester_chat_id = (
-                                query_context.get("requester_chat_id") or existing.requester_chat_id
+                                query_context.get("requester_chat_id")
+                                or existing.requester_chat_id
                             )
                             existing.requester_message_id = (
-                                query_context.get("requester_message_id") or existing.requester_message_id
+                                query_context.get("requester_message_id")
+                                or existing.requester_message_id
                             )
                             existing.requester_query = (
-                                query_context.get("requester_query") or existing.requester_query
+                                query_context.get("requester_query")
+                                or existing.requester_query
                             )
                     else:
-                        try:
-                            with session.begin_nested():
-                                record = NewsIntel(
-                                    code=code,
-                                    name=name,
-                                    dimension=dimension,
-                                    query=query,
-                                    provider=response.provider,
-                                    title=title,
-                                    snippet=snippet,
-                                    url=url_key,
-                                    source=source,
-                                    published_date=published_date,
-                                    fetched_at=datetime.now(),
-                                    query_id=current_query_id or None,
-                                    query_source=query_ctx.get("query_source"),
-                                    requester_platform=query_ctx.get("requester_platform"),
-                                    requester_user_id=query_ctx.get("requester_user_id"),
-                                    requester_user_name=query_ctx.get("requester_user_name"),
-                                    requester_chat_id=query_ctx.get("requester_chat_id"),
-                                    requester_message_id=query_ctx.get("requester_message_id"),
-                                    requester_query=query_ctx.get("requester_query"),
+                        # 收集新记录
+                        new_records.append(
+                            NewsIntel(
+                                code=code,
+                                name=name,
+                                dimension=dimension,
+                                query=query,
+                                provider=response.provider,
+                                title=item_data["title"],
+                                snippet=item_data["snippet"],
+                                url=url_key,
+                                source=item_data["source"],
+                                published_date=item_data["published_date"],
+                                fetched_at=datetime.now(),
+                                query_id=current_query_id or None,
+                                query_source=query_ctx.get("query_source"),
+                                requester_platform=query_ctx.get("requester_platform"),
+                                requester_user_id=query_ctx.get("requester_user_id"),
+                                requester_user_name=query_ctx.get(
+                                    "requester_user_name"
+                                ),
+                                requester_chat_id=query_ctx.get("requester_chat_id"),
+                                requester_message_id=query_ctx.get(
+                                    "requester_message_id"
+                                ),
+                                requester_query=query_ctx.get("requester_query"),
+                            )
+                        )
+
+                # 批量插入新记录
+                if new_records:
+                    try:
+                        session.add_all(new_records)
+                        session.flush()
+                        saved_count = len(new_records)
+                    except IntegrityError:
+                        # 如果批量插入失败，回退到逐条插入
+                        session.rollback()
+                        saved_count = 0
+                        for record in new_records:
+                            try:
+                                with session.begin_nested():
+                                    session.add(record)
+                                    session.flush()
+                                saved_count += 1
+                            except IntegrityError:
+                                logger.debug(
+                                    "新闻情报重复（已跳过）: %s %s", code, record.url
                                 )
-                                session.add(record)
-                                session.flush()
-                            saved_count += 1
-                        except IntegrityError:
-                            # 单条 URL 唯一约束冲突（如并发插入），仅跳过本条，保留本批其余成功项
-                            logger.debug("新闻情报重复（已跳过）: %s %s", code, url_key)
 
                 session.commit()
                 logger.info(f"保存新闻情报成功: {code}, 新增 {saved_count} 条")
@@ -1008,28 +1102,35 @@ class DatabaseManager:
             except Exception:
                 return None
 
-    def get_recent_news(self, code: str, days: int = 7, limit: int = 20) -> List[NewsIntel]:
+    def get_recent_news(
+        self, code: str, days: int = 7, limit: int = 20
+    ) -> List[NewsIntel]:
         """
         获取指定股票最近 N 天的新闻情报
         """
         cutoff_date = datetime.now() - timedelta(days=days)
 
         with self.get_session() as session:
-            results = session.execute(
-                select(NewsIntel)
-                .where(
-                    and_(
-                        NewsIntel.code == code,
-                        NewsIntel.fetched_at >= cutoff_date
+            results = (
+                session.execute(
+                    select(NewsIntel)
+                    .where(
+                        and_(
+                            NewsIntel.code == code, NewsIntel.fetched_at >= cutoff_date
+                        )
                     )
+                    .order_by(desc(NewsIntel.fetched_at))
+                    .limit(limit)
                 )
-                .order_by(desc(NewsIntel.fetched_at))
-                .limit(limit)
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             return list(results)
 
-    def get_news_intel_by_query_id(self, query_id: str, limit: int = 20) -> List[NewsIntel]:
+    def get_news_intel_by_query_id(
+        self, query_id: str, limit: int = 20
+    ) -> List[NewsIntel]:
         """
         根据 query_id 获取新闻情报列表
 
@@ -1043,15 +1144,23 @@ class DatabaseManager:
         from sqlalchemy import func
 
         with self.get_session() as session:
-            results = session.execute(
-                select(NewsIntel)
-                .where(NewsIntel.query_id == query_id)
-                .order_by(
-                    desc(func.coalesce(NewsIntel.published_date, NewsIntel.fetched_at)),
-                    desc(NewsIntel.fetched_at)
+            results = (
+                session.execute(
+                    select(NewsIntel)
+                    .where(NewsIntel.query_id == query_id)
+                    .order_by(
+                        desc(
+                            func.coalesce(
+                                NewsIntel.published_date, NewsIntel.fetched_at
+                            )
+                        ),
+                        desc(NewsIntel.fetched_at),
+                    )
+                    .limit(limit)
                 )
-                .limit(limit)
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             return list(results)
 
@@ -1062,7 +1171,7 @@ class DatabaseManager:
         report_type: str,
         news_content: Optional[str],
         context_snapshot: Optional[Dict[str, Any]] = None,
-        save_snapshot: bool = True
+        save_snapshot: bool = True,
     ) -> int:
         """
         保存分析结果历史记录
@@ -1138,57 +1247,69 @@ class DatabaseManager:
             if exclude_query_id and not query_id:
                 conditions.append(AnalysisHistory.query_id != exclude_query_id)
 
-            results = session.execute(
-                select(AnalysisHistory)
-                .where(and_(*conditions))
-                .order_by(desc(AnalysisHistory.created_at))
-                .limit(limit)
-            ).scalars().all()
+            results = (
+                session.execute(
+                    select(AnalysisHistory)
+                    .where(and_(*conditions))
+                    .order_by(desc(AnalysisHistory.created_at))
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
 
             return list(results)
-    
+
     def get_analysis_history_paginated(
         self,
         code: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         offset: int = 0,
-        limit: int = 20
+        limit: int = 20,
     ) -> Tuple[List[AnalysisHistory], int]:
         """
         分页查询分析历史记录（带总数）
-        
+
         Args:
             code: 股票代码筛选
             start_date: 开始日期（含）
             end_date: 结束日期（含）
             offset: 偏移量（跳过前 N 条）
             limit: 每页数量
-            
+
         Returns:
             Tuple[List[AnalysisHistory], int]: (记录列表, 总数)
         """
         from sqlalchemy import func
-        
+
         with self.get_session() as session:
             conditions = []
-            
+
             if code:
                 conditions.append(AnalysisHistory.code == code)
             if start_date:
                 # created_at >= start_date 00:00:00
-                conditions.append(AnalysisHistory.created_at >= datetime.combine(start_date, datetime.min.time()))
+                conditions.append(
+                    AnalysisHistory.created_at
+                    >= datetime.combine(start_date, datetime.min.time())
+                )
             if end_date:
                 # created_at < end_date+1 00:00:00 (即 <= end_date 23:59:59)
-                conditions.append(AnalysisHistory.created_at < datetime.combine(end_date + timedelta(days=1), datetime.min.time()))
-            
+                conditions.append(
+                    AnalysisHistory.created_at
+                    < datetime.combine(
+                        end_date + timedelta(days=1), datetime.min.time()
+                    )
+                )
+
             # 构建 where 子句
             where_clause = and_(*conditions) if conditions else True
-            
+
             # 查询总数
             total_query = select(func.count(AnalysisHistory.id)).where(where_clause)
             total = session.execute(total_query).scalar() or 0
-            
+
             # 查询分页数据
             data_query = (
                 select(AnalysisHistory)
@@ -1198,26 +1319,30 @@ class DatabaseManager:
                 .limit(limit)
             )
             results = session.execute(data_query).scalars().all()
-            
+
             return list(results), total
-    
+
     def get_analysis_history_by_id(self, record_id: int) -> Optional[AnalysisHistory]:
         """
         根据数据库主键 ID 查询单条分析历史记录
-        
+
         由于 query_id 可能重复（批量分析时多条记录共享同一 query_id），
         使用主键 ID 确保精确查询唯一记录。
-        
+
         Args:
             record_id: 分析历史记录的主键 ID
-            
+
         Returns:
             AnalysisHistory 对象，不存在返回 None
         """
         with self.get_session() as session:
-            result = session.execute(
-                select(AnalysisHistory).where(AnalysisHistory.id == record_id)
-            ).scalars().first()
+            result = (
+                session.execute(
+                    select(AnalysisHistory).where(AnalysisHistory.id == record_id)
+                )
+                .scalars()
+                .first()
+            )
             return result
 
     def delete_analysis_history_records(self, record_ids: List[int]) -> int:
@@ -1232,20 +1357,26 @@ class DatabaseManager:
         Returns:
             实际删除的历史记录数量
         """
-        ids = sorted({int(record_id) for record_id in record_ids if record_id is not None})
+        ids = sorted(
+            {int(record_id) for record_id in record_ids if record_id is not None}
+        )
         if not ids:
             return 0
 
         with self.session_scope() as session:
             session.execute(
-                delete(BacktestResult).where(BacktestResult.analysis_history_id.in_(ids))
+                delete(BacktestResult).where(
+                    BacktestResult.analysis_history_id.in_(ids)
+                )
             )
             result = session.execute(
                 delete(AnalysisHistory).where(AnalysisHistory.id.in_(ids))
             )
             return result.rowcount or 0
 
-    def get_latest_analysis_by_query_id(self, query_id: str) -> Optional[AnalysisHistory]:
+    def get_latest_analysis_by_query_id(
+        self, query_id: str
+    ) -> Optional[AnalysisHistory]:
         """
         根据 query_id 查询最新一条分析历史记录
 
@@ -1258,155 +1389,159 @@ class DatabaseManager:
             AnalysisHistory 对象，不存在返回 None
         """
         with self.get_session() as session:
-            result = session.execute(
-                select(AnalysisHistory)
-                .where(AnalysisHistory.query_id == query_id)
-                .order_by(desc(AnalysisHistory.created_at))
-                .limit(1)
-            ).scalars().first()
+            result = (
+                session.execute(
+                    select(AnalysisHistory)
+                    .where(AnalysisHistory.query_id == query_id)
+                    .order_by(desc(AnalysisHistory.created_at))
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
             return result
-    
+
     def get_data_range(
-        self, 
-        code: str, 
-        start_date: date, 
-        end_date: date
+        self, code: str, start_date: date, end_date: date
     ) -> List[StockDaily]:
         """
         获取指定日期范围的数据
-        
+
         Args:
             code: 股票代码
             start_date: 开始日期
             end_date: 结束日期
-            
+
         Returns:
             StockDaily 对象列表
         """
         with self.get_session() as session:
-            results = session.execute(
-                select(StockDaily)
-                .where(
-                    and_(
-                        StockDaily.code == code,
-                        StockDaily.date >= start_date,
-                        StockDaily.date <= end_date
+            results = (
+                session.execute(
+                    select(StockDaily)
+                    .where(
+                        and_(
+                            StockDaily.code == code,
+                            StockDaily.date >= start_date,
+                            StockDaily.date <= end_date,
+                        )
                     )
+                    .order_by(StockDaily.date)
                 )
-                .order_by(StockDaily.date)
-            ).scalars().all()
-            
+                .scalars()
+                .all()
+            )
+
             return list(results)
-    
+
     def save_daily_data(
-        self, 
-        df: pd.DataFrame, 
-        code: str,
-        data_source: str = "Unknown"
+        self, df: pd.DataFrame, code: str, data_source: str = "Unknown"
     ) -> int:
         """
         保存日线数据到数据库
-        
-        策略：
-        - 使用 UPSERT 逻辑（存在则更新，不存在则插入）
-        - 跳过已存在的数据，避免重复
-        
+
+        性能优化版本：
+        - 使用批量 UPSERT (INSERT ... ON CONFLICT DO UPDATE)
+        - 单次 SQL 执行替代 N+1 查询模式
+        - 100 行数据：原 200+ 次查询 → 1 次查询
+
         Args:
             df: 包含日线数据的 DataFrame
             code: 股票代码
             data_source: 数据来源名称
-            
+
         Returns:
             新增/更新的记录数
         """
         if df is None or df.empty:
             logger.warning(f"保存数据为空，跳过 {code}")
             return 0
-        
-        saved_count = 0
-        
+
+        # 预处理数据：解析日期并构建记录列表
+        records = []
+        for _, row in df.iterrows():
+            row_date = row.get("date")
+            if isinstance(row_date, str):
+                row_date = datetime.strptime(row_date, "%Y-%m-%d").date()
+            elif isinstance(row_date, datetime):
+                row_date = row_date.date()
+            elif isinstance(row_date, pd.Timestamp):
+                row_date = row_date.date()
+
+            records.append(
+                {
+                    "code": code,
+                    "date": row_date,
+                    "open": row.get("open"),
+                    "high": row.get("high"),
+                    "low": row.get("low"),
+                    "close": row.get("close"),
+                    "volume": row.get("volume"),
+                    "amount": row.get("amount"),
+                    "pct_chg": row.get("pct_chg"),
+                    "ma5": row.get("ma5"),
+                    "ma10": row.get("ma10"),
+                    "ma20": row.get("ma20"),
+                    "volume_ratio": row.get("volume_ratio"),
+                    "data_source": data_source,
+                }
+            )
+
+        if not records:
+            return 0
+
+        saved_count = len(records)
+
         with self.get_session() as session:
             try:
-                for _, row in df.iterrows():
-                    # 解析日期
-                    row_date = row.get('date')
-                    if isinstance(row_date, str):
-                        row_date = datetime.strptime(row_date, '%Y-%m-%d').date()
-                    elif isinstance(row_date, datetime):
-                        row_date = row_date.date()
-                    elif isinstance(row_date, pd.Timestamp):
-                        row_date = row_date.date()
-                    
-                    # 检查是否已存在
-                    existing = session.execute(
-                        select(StockDaily).where(
-                            and_(
-                                StockDaily.code == code,
-                                StockDaily.date == row_date
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    
-                    if existing:
-                        # 更新现有记录
-                        existing.open = row.get('open')
-                        existing.high = row.get('high')
-                        existing.low = row.get('low')
-                        existing.close = row.get('close')
-                        existing.volume = row.get('volume')
-                        existing.amount = row.get('amount')
-                        existing.pct_chg = row.get('pct_chg')
-                        existing.ma5 = row.get('ma5')
-                        existing.ma10 = row.get('ma10')
-                        existing.ma20 = row.get('ma20')
-                        existing.volume_ratio = row.get('volume_ratio')
-                        existing.data_source = data_source
-                        existing.updated_at = datetime.now()
-                    else:
-                        # 创建新记录
-                        record = StockDaily(
-                            code=code,
-                            date=row_date,
-                            open=row.get('open'),
-                            high=row.get('high'),
-                            low=row.get('low'),
-                            close=row.get('close'),
-                            volume=row.get('volume'),
-                            amount=row.get('amount'),
-                            pct_chg=row.get('pct_chg'),
-                            ma5=row.get('ma5'),
-                            ma10=row.get('ma10'),
-                            ma20=row.get('ma20'),
-                            volume_ratio=row.get('volume_ratio'),
-                            data_source=data_source,
-                        )
-                        session.add(record)
-                        saved_count += 1
-                
+                # 使用 SQLite 的 INSERT ... ON CONFLICT DO UPDATE
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+                stmt = sqlite_insert(StockDaily).values(records)
+
+                # 冲突时更新所有字段（除了主键）
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["code", "date"],  # 唯一约束字段
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                        "amount": stmt.excluded.amount,
+                        "pct_chg": stmt.excluded.pct_chg,
+                        "ma5": stmt.excluded.ma5,
+                        "ma10": stmt.excluded.ma10,
+                        "ma20": stmt.excluded.ma20,
+                        "volume_ratio": stmt.excluded.volume_ratio,
+                        "data_source": stmt.excluded.data_source,
+                        "updated_at": datetime.now(),
+                    },
+                )
+
+                session.execute(stmt)
                 session.commit()
-                logger.info(f"保存 {code} 数据成功，新增 {saved_count} 条")
-                
+                logger.info(f"保存 {code} 数据成功，批量处理 {saved_count} 条记录")
+
             except Exception as e:
                 session.rollback()
                 logger.error(f"保存 {code} 数据失败: {e}")
                 raise
-        
+
         return saved_count
-    
+
     def get_analysis_context(
-        self, 
-        code: str,
-        target_date: Optional[date] = None
+        self, code: str, target_date: Optional[date] = None
     ) -> Optional[Dict[str, Any]]:
         """
         获取分析所需的上下文数据
-        
+
         返回今日数据 + 昨日数据的对比信息
-        
+
         Args:
             code: 股票代码
             target_date: 目标日期（默认今天）
-            
+
         Returns:
             包含今日数据、昨日对比等信息的字典
         """
@@ -1416,46 +1551,49 @@ class DatabaseManager:
         # 并不会按 target_date 精确取当日/前一交易日的上下文。
         # 因此若未来需要支持“按历史某天复盘/重算”的可解释性，这里需要调整。
         # 该行为目前保留（按需求不改逻辑）。
-        
+
         # 获取最近2天数据
         recent_data = self.get_latest_data(code, days=2)
-        
+
         if not recent_data:
             logger.warning(f"未找到 {code} 的数据")
             return None
-        
+
         today_data = recent_data[0]
         yesterday_data = recent_data[1] if len(recent_data) > 1 else None
-        
+
         context = {
-            'code': code,
-            'date': today_data.date.isoformat(),
-            'today': today_data.to_dict(),
+            "code": code,
+            "date": today_data.date.isoformat(),
+            "today": today_data.to_dict(),
         }
-        
+
         if yesterday_data:
-            context['yesterday'] = yesterday_data.to_dict()
-            
+            context["yesterday"] = yesterday_data.to_dict()
+
             # 计算相比昨日的变化
             if yesterday_data.volume and yesterday_data.volume > 0:
-                context['volume_change_ratio'] = round(
+                context["volume_change_ratio"] = round(
                     today_data.volume / yesterday_data.volume, 2
                 )
-            
+
             if yesterday_data.close and yesterday_data.close > 0:
-                context['price_change_ratio'] = round(
-                    (today_data.close - yesterday_data.close) / yesterday_data.close * 100, 2
+                context["price_change_ratio"] = round(
+                    (today_data.close - yesterday_data.close)
+                    / yesterday_data.close
+                    * 100,
+                    2,
                 )
-            
+
             # 均线形态判断
-            context['ma_status'] = self._analyze_ma_status(today_data)
-        
+            context["ma_status"] = self._analyze_ma_status(today_data)
+
         return context
-    
+
     def _analyze_ma_status(self, data: StockDaily) -> str:
         """
         分析均线形态
-        
+
         判断条件：
         - 多头排列：close > ma5 > ma10 > ma20
         - 空头排列：close < ma5 < ma10 < ma20
@@ -1468,7 +1606,7 @@ class DatabaseManager:
         ma5 = data.ma5 or 0
         ma10 = data.ma10 or 0
         ma20 = data.ma20 or 0
-        
+
         if close > ma5 > ma10 > ma20 > 0:
             return "多头排列 📈"
         elif close < ma5 < ma10 < ma20 and ma20 > 0:
@@ -1532,10 +1670,12 @@ class DatabaseManager:
         生成完整分析结果字典
         """
         data = result.to_dict() if hasattr(result, "to_dict") else {}
-        data.update({
-            'data_sources': getattr(result, 'data_sources', ''),
-            'raw_response': getattr(result, 'raw_response', None),
-        })
+        data.update(
+            {
+                "data_sources": getattr(result, "data_sources", ""),
+                "raw_response": getattr(result, "raw_response", None),
+            }
+        )
         return data
 
     @staticmethod
@@ -1553,8 +1693,8 @@ class DatabaseManager:
             v = float(value)
             return v if v > 0 else None
 
-        text = str(value).replace(',', '').replace('，', '').strip()
-        if not text or text == '-' or text == '—' or text == 'N/A':
+        text = str(value).replace(",", "").replace("，", "").strip()
+        if not text or text == "-" or text == "—" or text == "N/A":
             return None
 
         # 尝试直接解析纯数字字符串
@@ -1569,7 +1709,7 @@ class DatabaseManager:
         if yuan_pos != -1:
             segment_start = colon_pos + 1 if colon_pos != -1 else 0
             segment = text[segment_start:yuan_pos]
-            
+
             # 使用 finditer 并过滤掉 MA 开头的数字
             matches = list(re.finditer(r"-?\d+(?:\.\d+)?", segment))
             valid_numbers = []
@@ -1577,11 +1717,11 @@ class DatabaseManager:
                 # 检查前面是否是 "MA" (忽略大小写)
                 start_idx = m.start()
                 if start_idx >= 2:
-                    prefix = segment[start_idx-2:start_idx].upper()
+                    prefix = segment[start_idx - 2 : start_idx].upper()
                     if prefix == "MA":
                         continue
                 valid_numbers.append(m.group())
-            
+
             if valid_numbers:
                 try:
                     return abs(float(valid_numbers[-1]))
@@ -1591,7 +1731,7 @@ class DatabaseManager:
         # 兜底：无"元"字时，先截去第一个括号后的内容，避免误提取括号内技术指标数字
         # 例如 "1.52-1.53 (回踩MA5/10附近)" → 仅在 "1.52-1.53 " 中搜索
         paren_pos = len(text)
-        for paren_char in ('(', '（'):
+        for paren_char in ("(", "（"):
             pos = text.find(paren_char)
             if pos != -1:
                 paren_pos = min(paren_pos, pos)
@@ -1600,7 +1740,10 @@ class DatabaseManager:
         valid_numbers = []
         for m in re.finditer(r"\d+(?:\.\d+)?", search_text):
             start_idx = m.start()
-            if start_idx >= 2 and search_text[start_idx-2:start_idx].upper() == "MA":
+            if (
+                start_idx >= 2
+                and search_text[start_idx - 2 : start_idx].upper() == "MA"
+            ):
                 continue
             valid_numbers.append(m.group())
         if valid_numbers:
@@ -1626,13 +1769,19 @@ class DatabaseManager:
             raw_points = result.get_sniper_points() or {}
 
         # Path 2: direct dashboard traversal when standard path yields empty values
-        if not any(raw_points.get(k) for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")):
+        if not any(
+            raw_points.get(k)
+            for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")
+        ):
             dashboard = getattr(result, "dashboard", None)
             if isinstance(dashboard, dict):
                 raw_points = self._find_sniper_in_dashboard(dashboard) or raw_points
 
         # Path 3: try raw_result for agent mode results
-        if not any(raw_points.get(k) for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")):
+        if not any(
+            raw_points.get(k)
+            for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")
+        ):
             raw_response = getattr(result, "raw_response", None)
             if isinstance(raw_response, dict):
                 raw_points = self._find_sniper_in_dashboard(raw_response) or raw_points
@@ -1683,10 +1832,7 @@ class DatabaseManager:
 
     @staticmethod
     def _build_fallback_url_key(
-        code: str,
-        title: str,
-        source: str,
-        published_date: Optional[datetime]
+        code: str, title: str, source: str, published_date: Optional[datetime]
     ) -> str:
         """
         生成无 URL 时的去重键（确保稳定且较短）
@@ -1696,30 +1842,35 @@ class DatabaseManager:
         digest = hashlib.md5(raw_key.encode("utf-8")).hexdigest()
         return f"no-url:{code}:{digest}"
 
-    def save_conversation_message(self, session_id: str, role: str, content: str) -> None:
+    def save_conversation_message(
+        self, session_id: str, role: str, content: str
+    ) -> None:
         """
         保存 Agent 对话消息
         """
         with self.session_scope() as session:
-            msg = ConversationMessage(
-                session_id=session_id,
-                role=role,
-                content=content
-            )
+            msg = ConversationMessage(session_id=session_id, role=role, content=content)
             session.add(msg)
 
-    def get_conversation_history(self, session_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_conversation_history(
+        self, session_id: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
         """
         获取 Agent 对话历史
         """
         with self.session_scope() as session:
-            stmt = select(ConversationMessage).filter(
-                ConversationMessage.session_id == session_id
-            ).order_by(ConversationMessage.created_at.desc()).limit(limit)
+            stmt = (
+                select(ConversationMessage)
+                .filter(ConversationMessage.session_id == session_id)
+                .order_by(ConversationMessage.created_at.desc())
+                .limit(limit)
+            )
             messages = session.execute(stmt).scalars().all()
 
             # 倒序返回，保证时间顺序
-            return [{"role": msg.role, "content": msg.content} for msg in reversed(messages)]
+            return [
+                {"role": msg.role, "content": msg.content} for msg in reversed(messages)
+            ]
 
     def conversation_session_exists(self, session_id: str) -> bool:
         """Return True when at least one message exists for the given session."""
@@ -1756,28 +1907,31 @@ class DatabaseManager:
         with self.session_scope() as session:
             normalized_prefix = None
             if session_prefix:
-                normalized_prefix = session_prefix if session_prefix.endswith(":") else f"{session_prefix}:"
+                normalized_prefix = (
+                    session_prefix
+                    if session_prefix.endswith(":")
+                    else f"{session_prefix}:"
+                )
             exact_ids = [sid for sid in (extra_session_ids or []) if sid]
 
             # 聚合每个 session 的消息数和最后活跃时间
-            base = (
-                select(
-                    ConversationMessage.session_id,
-                    func.count(ConversationMessage.id).label("message_count"),
-                    func.min(ConversationMessage.created_at).label("created_at"),
-                    func.max(ConversationMessage.created_at).label("last_active"),
-                )
+            base = select(
+                ConversationMessage.session_id,
+                func.count(ConversationMessage.id).label("message_count"),
+                func.min(ConversationMessage.created_at).label("created_at"),
+                func.max(ConversationMessage.created_at).label("last_active"),
             )
             conditions = []
             if normalized_prefix:
-                conditions.append(ConversationMessage.session_id.startswith(normalized_prefix))
+                conditions.append(
+                    ConversationMessage.session_id.startswith(normalized_prefix)
+                )
             if exact_ids:
                 conditions.append(ConversationMessage.session_id.in_(exact_ids))
             if conditions:
                 base = base.where(or_(*conditions))
             stmt = (
-                base
-                .group_by(ConversationMessage.session_id)
+                base.group_by(ConversationMessage.session_id)
                 .order_by(desc(func.max(ConversationMessage.created_at)))
                 .limit(limit)
             )
@@ -1800,16 +1954,24 @@ class DatabaseManager:
                 ).scalar()
                 title = (first_user_msg or "新对话")[:60]
 
-                results.append({
-                    "session_id": sid,
-                    "title": title,
-                    "message_count": row.message_count,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "last_active": row.last_active.isoformat() if row.last_active else None,
-                })
+                results.append(
+                    {
+                        "session_id": sid,
+                        "title": title,
+                        "message_count": row.message_count,
+                        "created_at": row.created_at.isoformat()
+                        if row.created_at
+                        else None,
+                        "last_active": row.last_active.isoformat()
+                        if row.last_active
+                        else None,
+                    }
+                )
             return results
 
-    def get_conversation_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_conversation_messages(
+        self, session_id: str, limit: int = 100
+    ) -> List[Dict[str, Any]]:
         """
         获取单个会话的完整消息列表（用于前端恢复历史）
         """
@@ -1826,7 +1988,9 @@ class DatabaseManager:
                     "id": str(msg.id),
                     "role": msg.role,
                     "content": msg.content,
-                    "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                    "created_at": msg.created_at.isoformat()
+                    if msg.created_at
+                    else None,
                 }
                 for msg in messages
             ]
@@ -1959,41 +2123,45 @@ def persist_llm_usage(
             stock_code=stock_code,
         )
     except Exception as exc:
-        logging.getLogger(__name__).warning("[LLM usage] failed to persist usage record: %s", exc)
+        logging.getLogger(__name__).warning(
+            "[LLM usage] failed to persist usage record: %s", exc
+        )
 
 
 if __name__ == "__main__":
     # 测试代码
     logging.basicConfig(level=logging.DEBUG)
-    
+
     db = get_db()
-    
+
     print("=== 数据库测试 ===")
     print(f"数据库初始化成功")
-    
+
     # 测试检查今日数据
-    has_data = db.has_today_data('600519')
+    has_data = db.has_today_data("600519")
     print(f"茅台今日是否有数据: {has_data}")
-    
+
     # 测试保存数据
-    test_df = pd.DataFrame({
-        'date': [date.today()],
-        'open': [1800.0],
-        'high': [1850.0],
-        'low': [1780.0],
-        'close': [1820.0],
-        'volume': [10000000],
-        'amount': [18200000000],
-        'pct_chg': [1.5],
-        'ma5': [1810.0],
-        'ma10': [1800.0],
-        'ma20': [1790.0],
-        'volume_ratio': [1.2],
-    })
-    
-    saved = db.save_daily_data(test_df, '600519', 'TestSource')
+    test_df = pd.DataFrame(
+        {
+            "date": [date.today()],
+            "open": [1800.0],
+            "high": [1850.0],
+            "low": [1780.0],
+            "close": [1820.0],
+            "volume": [10000000],
+            "amount": [18200000000],
+            "pct_chg": [1.5],
+            "ma5": [1810.0],
+            "ma10": [1800.0],
+            "ma20": [1790.0],
+            "volume_ratio": [1.2],
+        }
+    )
+
+    saved = db.save_daily_data(test_df, "600519", "TestSource")
     print(f"保存测试数据: {saved} 条")
-    
+
     # 测试获取上下文
-    context = db.get_analysis_context('600519')
+    context = db.get_analysis_context("600519")
     print(f"分析上下文: {context}")
