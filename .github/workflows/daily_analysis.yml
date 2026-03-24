@@ -51,8 +51,8 @@ jobs:
       
       - name: 安装依赖
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt --retries 3 --timeout 120
       
       - name: 创建必要目录
         run: |

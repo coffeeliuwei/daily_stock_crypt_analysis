@@ -11,7 +11,7 @@ exchange-calendars>=4.5.0   # 交易日历（A股/港股/美股，Issue #373）
 
 # 数据源依赖（三层架构）
 # 第一层：主数据源
-httpx>=0.27.0               # Priority 0: QVeris API 客户端
+httpx[socks]>=0.27.0        # HTTP 客户端 + SOCKS 代理支持（QVeris API / OpenAI）
 
 # 第二层：免费数据源
 efinance>=0.5.5             # Priority 0: 东方财富数据源
@@ -54,8 +54,7 @@ requests>=2.31.0            # HTTP 请求
 markdown2>=2.4.0            # Markdown 转 HTML
 imgkit>=1.2.0              # Markdown 转图片（需安装 wkhtmltopdf）
 fake-useragent>=1.4.0       # 随机 User-Agent 防封禁
-httpx[socks]                # HTTP 客户端 + SOCKS 代理支持（OpenAI 可选依赖）
-dingtalk-stream >= 0.24.3    # 钉钉 Stream SDK
+dingtalk-stream>=0.24.3    # 钉钉 Stream SDK
 # 数据库
 # SQLite 是 Python 内置，无需额外安装
 
