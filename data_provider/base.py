@@ -206,6 +206,23 @@ CRYPTO_SYMBOLS = {
     "ONDO",
 }
 
+# 支持通过环境变量扩展加密货币符号白名单
+# 格式: CRYPTO_SYMBOLS=BTC,ETH,SOL,PEPE,BONK (逗号分隔)
+import os as _os
+
+_EXTRA_CRYPTO_SYMBOLS = _os.getenv("CRYPTO_SYMBOLS", "")
+if _EXTRA_CRYPTO_SYMBOLS:
+    _extra_set = {
+        s.strip().upper() for s in _EXTRA_CRYPTO_SYMBOLS.split(",") if s.strip()
+    }
+    CRYPTO_SYMBOLS = CRYPTO_SYMBOLS.union(_extra_set)
+    if _extra_set:
+        import logging as _logging
+
+        _logging.getLogger(__name__).info(
+            f"[配置] 从环境变量加载额外加密货币符号: {sorted(_extra_set)}"
+        )
+
 # Suffixes that indicate cryptocurrency trading pairs
 CRYPTO_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BUSD", "EUR", "BTC", "ETH", "BNB")
 
@@ -1511,6 +1528,46 @@ class DataFetcherManager:
                 break
 
             logger.warning(f"[实时行情] 港股 {stock_code} 无可用数据源")
+            return None
+
+        # ETF 实时行情单独路由，确保使用 ETF 专用数据源
+        # ETF 需要特殊处理：Efinance 需要 ['ETF'] 参数，Akshare 需要 fund_etf_spot_em
+        if _is_etf_code(stock_code):
+            # 优先使用 EfinanceFetcher（ETF 专用接口）
+            for fetcher in self._fetchers:
+                if fetcher.name == "EfinanceFetcher":
+                    if hasattr(fetcher, "get_realtime_quote"):
+                        try:
+                            quote = fetcher.get_realtime_quote(stock_code)
+                            if quote is not None and quote.has_basic_data():
+                                logger.info(
+                                    f"[实时行情] ETF {stock_code} 成功获取 (来源: efinance)"
+                                )
+                                return quote
+                        except Exception as e:
+                            logger.warning(
+                                f"[实时行情] ETF {stock_code} efinance 获取失败: {e}"
+                            )
+                    break
+
+            # Fallback: 使用 AkshareFetcher 的 ETF 专用方法
+            for fetcher in self._fetchers:
+                if fetcher.name == "AkshareFetcher":
+                    if hasattr(fetcher, "get_realtime_quote"):
+                        try:
+                            quote = fetcher.get_realtime_quote(stock_code, source="em")
+                            if quote is not None and quote.has_basic_data():
+                                logger.info(
+                                    f"[实时行情] ETF {stock_code} 成功获取 (来源: akshare_etf)"
+                                )
+                                return quote
+                        except Exception as e:
+                            logger.warning(
+                                f"[实时行情] ETF {stock_code} akshare 获取失败: {e}"
+                            )
+                    break
+
+            logger.warning(f"[实时行情] ETF {stock_code} 无可用数据源")
             return None
 
         # 获取配置的数据源优先级

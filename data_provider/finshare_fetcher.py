@@ -29,7 +29,7 @@ from typing import Optional, Dict, Any, List
 
 import pandas as pd
 
-from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
+from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, _is_crypto_code
 from .realtime_types import UnifiedRealtimeQuote, ChipDistribution, safe_float
 
 logger = logging.getLogger(__name__)
@@ -171,21 +171,14 @@ class FinshareFetcher(BaseFetcher):
         return df
 
     def _convert_code_format(self, stock_code: str) -> str:
-        """
-        转换股票代码格式
-
-        Finshare 使用带市场后缀的格式：
-        - A 股: 600519.SH (上交所), 000001.SZ (深交所)
-        - 港股: 00700.HK
-        - 美股: AAPL.US
-
-        Args:
-            stock_code: 原始股票代码
-
-        Returns:
-            Finshare 格式的代码
-        """
         code = stock_code.strip().upper()
+
+        # 加密货币代码不应该通过 Finshare 处理，抛出异常让调用方使用正确的数据源
+        if _is_crypto_code(code):
+            raise DataFetchError(
+                f"[FinshareFetcher] 加密货币代码 {code} 不支持通过股票数据源获取，"
+                f"请使用 CryptoFetcher"
+            )
 
         # 已经是 Finshare 格式
         if "." in code:
