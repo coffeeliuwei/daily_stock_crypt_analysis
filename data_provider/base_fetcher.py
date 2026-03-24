@@ -226,7 +226,8 @@ class BaseFetcher(ABC):
         3. 去除空值行
         4. 按日期排序
         """
-        df = df.copy()
+        # 使用浅拷贝减少内存占用（后续操作会创建新对象）
+        df = df.copy(deep=False)
 
         # 确保日期列为 datetime 类型
         if "date" in df.columns:
@@ -254,7 +255,8 @@ class BaseFetcher(ABC):
         - MA5, MA10, MA20: 移动平均线
         - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
         """
-        df = df.copy()
+        # 使用浅拷贝：只添加新列，不修改原有数据
+        df = df.copy(deep=False)
 
         # 移动平均线
         df["ma5"] = df["close"].rolling(window=5, min_periods=1).mean()

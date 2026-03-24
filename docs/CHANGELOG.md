@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### 新功能
 
+- 🪙 **加密货币模型池支持** — 加密货币分析现支持 LLM 模型池，与股票分析保持一致。当配置多个模型时（如 `OPENAI_MODEL=qwen3.5-plus,qwen3-max`），加密货币分析也会自动使用模型池进行负载均衡。
+- 🗄️ **LLM 分析缓存** — 新增 `LLM_ANALYSIS_CACHE` 缓存实例（TTL 10 分钟，最多 200 条），避免同一天同一股票重复分析。
+
+### 变更
+
+- ⚡ **Finshare 重试次数优化** — 将 Finshare 数据源重试次数从 4 次减少为 2 次（总尝试次数从 5 次降为 2 次），减少因数据源不稳定导致的长时间等待。
+- 🔒 **Finshare 线程安全** — 为 Finshare 重试处理器添加线程锁，防止多线程竞态条件。
+
+### 性能优化
+
+- 🌐 **HTTP 连接池优化** — 移除 `qveris_fetcher.py`、`crypto_sentiment_service.py`、`crypto_news_fetcher.py` 中的临时 HTTP 客户端创建代码，统一使用 `get_http_client()` 连接池（100 连接，20 keepalive），减少 TCP 握手开销。
+- 💾 **DataFrame 内存优化** — 将所有 fetcher 中的 `df.copy()` 改为 `df.copy(deep=False)`，减少约 50% 内存占用。涉及文件：`base_fetcher.py`、`ashare_fetcher.py`、`qveris_fetcher.py`、`finshare_fetcher.py`。
+
 - 🔄 **数据源池化架构** — 股票数据获取支持多数据源池化管理，随机选择数据源避免单一数据源过载，互斥访问防止并发冲突，健康状态追踪自动降级失败数据源。
 - 🤖 **LLM 模型池** — 支持在 `OPENAI_MODEL` 中配置多个模型（逗号分隔），共用同一 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`，随机选择模型实现负载均衡。适用于阿里云百炼等 OpenAI 兼容平台。
 - ⚡ **动态并发计算** — 根据股票数量自动计算最优并发数，公式：`并发数 = ceil(股票数量 / MAX_STOCKS_PER_WORKER)`。默认每并发处理 10 只股票，82 只股票自动扩展到 9 个并发。

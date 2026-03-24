@@ -125,20 +125,14 @@ class QVerisFetcher(BaseFetcher):
         """
         try:
             client = get_http_client()
-            if client:
-                response = client.post(
-                    f"{QVERIS_BASE_URL}/search",
-                    headers=self._get_headers(),
-                    json={"query": query, "limit": limit},
-                )
-            else:
-                # Fallback: 创建临时客户端
-                with httpx.Client(timeout=QVERIS_TIMEOUT) as temp_client:
-                    response = temp_client.post(
-                        f"{QVERIS_BASE_URL}/search",
-                        headers=self._get_headers(),
-                        json={"query": query, "limit": limit},
-                    )
+            if not client:
+                logger.warning("[QVerisFetcher] HTTP 客户端不可用")
+                return {}
+            response = client.post(
+                f"{QVERIS_BASE_URL}/search",
+                headers=self._get_headers(),
+                json={"query": query, "limit": limit},
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -166,30 +160,19 @@ class QVerisFetcher(BaseFetcher):
         """
         try:
             client = get_http_client()
-            if client:
-                response = client.post(
-                    f"{QVERIS_BASE_URL}/tools/execute",
-                    params={"tool_id": tool_id},
-                    headers=self._get_headers(),
-                    json={
-                        "search_id": search_id,
-                        "parameters": parameters,
-                        "max_response_size": max_response_size,
-                    },
-                )
-            else:
-                # Fallback: 创建临时客户端
-                with httpx.Client(timeout=QVERIS_TIMEOUT) as temp_client:
-                    response = temp_client.post(
-                        f"{QVERIS_BASE_URL}/tools/execute",
-                        params={"tool_id": tool_id},
-                        headers=self._get_headers(),
-                        json={
-                            "search_id": search_id,
-                            "parameters": parameters,
-                            "max_response_size": max_response_size,
-                        },
-                    )
+            if not client:
+                logger.warning("[QVerisFetcher] HTTP 客户端不可用")
+                return {}
+            response = client.post(
+                f"{QVERIS_BASE_URL}/tools/execute",
+                params={"tool_id": tool_id},
+                headers=self._get_headers(),
+                json={
+                    "search_id": search_id,
+                    "parameters": parameters,
+                    "max_response_size": max_response_size,
+                },
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -268,7 +251,8 @@ class QVerisFetcher(BaseFetcher):
         Returns:
             标准化后的 DataFrame
         """
-        df = df.copy()
+        # 使用浅拷贝：只重命名列和添加新列，不修改原有数值
+        df = df.copy(deep=False)
 
         # 尝试映射列名
         column_mapping = {

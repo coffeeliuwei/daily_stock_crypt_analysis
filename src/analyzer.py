@@ -1470,6 +1470,29 @@ class GeminiAnalyzer:
         )
         temperature = generation_config.get("temperature", 0.7)
 
+        # --- Model Pool path: 使用模型池调用（与股票分析一致）---
+        if self._model_pool:
+            try:
+                messages = [
+                    {"role": "system", "content": self.CRYPTO_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
+                response_text, model_used, usage = self._model_pool.call(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                logger.info(
+                    f"[CryptoLLM] Model pool call succeeded with model: {model_used}"
+                )
+                return response_text, model_used, usage
+            except Exception as e:
+                logger.warning(
+                    f"[CryptoLLM] Model pool call failed: {e}, "
+                    f"falling back to legacy mode"
+                )
+                # 继续执行原有逻辑
+
         models_to_try = [config.litellm_model] + (config.litellm_fallback_models or [])
         models_to_try = [m for m in models_to_try if m]
 

@@ -242,7 +242,8 @@ class AshareFetcher(BaseFetcher):
         将 Ashare 返回的数据标准化为统一格式：
         ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']
         """
-        df = df.copy()
+        # 使用浅拷贝：只重命名列和添加 pct_chg，不修改原有数值
+        df = df.copy(deep=False)
 
         # 确保必要列存在
         required_cols = ["date", "open", "high", "low", "close", "volume"]

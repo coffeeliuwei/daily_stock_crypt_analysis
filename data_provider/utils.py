@@ -546,10 +546,12 @@ class TTLCache:
 # - 历史数据缓存: 1 小时，最多 500 条
 # - 筹码分布缓存: 30 分钟，最多 200 条
 # - 新闻搜索缓存: 15 分钟，最多 1000 条
+# - LLM 分析缓存: 10 分钟，最多 200 条（同一天同一股票不重复分析）
 GLOBAL_CACHE = TTLCache(default_ttl=300, max_size=5000)
 HISTORICAL_DATA_CACHE = TTLCache(default_ttl=3600, max_size=500)  # 1 小时
 CHIP_DISTRIBUTION_CACHE = TTLCache(default_ttl=1800, max_size=200)  # 30 分钟
 NEWS_CACHE = TTLCache(default_ttl=900, max_size=1000)  # 15 分钟
+LLM_ANALYSIS_CACHE = TTLCache(default_ttl=600, max_size=200)  # 10 分钟
 
 
 # === HTTP 连接池管理器 ===

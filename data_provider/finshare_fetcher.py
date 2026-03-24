@@ -23,6 +23,7 @@ GitHub: https://github.com/finvfamily/finshare
 """
 
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -33,6 +34,48 @@ from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, _is_crypto_code
 from .realtime_types import UnifiedRealtimeQuote, ChipDistribution, safe_float
 
 logger = logging.getLogger(__name__)
+
+# finshare 重试配置：设置为 2 次总尝试（max_retries=1 表示首次 + 1 次重试）
+_FINSHARE_MAX_RETRIES = 1
+_FINSHARE_RETRY_HANDLER = None
+_FINSHARE_RETRY_LOCK = threading.Lock()  # 线程安全锁
+
+
+def _get_finshare_retry_handler():
+    """获取配置后的 finshare 重试处理器，并覆盖全局实例（线程安全）"""
+    global _FINSHARE_RETRY_HANDLER
+
+    # 快速路径：已初始化则直接返回
+    if _FINSHARE_RETRY_HANDLER is not None:
+        return _FINSHARE_RETRY_HANDLER
+
+    # 双重检查锁定模式
+    with _FINSHARE_RETRY_LOCK:
+        if _FINSHARE_RETRY_HANDLER is not None:
+            return _FINSHARE_RETRY_HANDLER
+
+        try:
+            from finshare.sources.resilience import retry_handler as rh_module
+            from finshare.sources.resilience.retry_handler import (
+                RetryHandler,
+                RetryConfig,
+            )
+
+            config = RetryConfig(max_retries=_FINSHARE_MAX_RETRIES)
+            _FINSHARE_RETRY_HANDLER = RetryHandler(config)
+
+            # 覆盖 finshare 全局重试处理器
+            rh_module.retry_handler = _FINSHARE_RETRY_HANDLER
+
+            logger.info(
+                f"[FinshareFetcher] 重试处理器已配置: max_retries={_FINSHARE_MAX_RETRIES} (总尝试次数={_FINSHARE_MAX_RETRIES + 1})"
+            )
+        except ImportError:
+            logger.debug("[FinshareFetcher] 无法导入 finshare 重试模块，使用默认配置")
+        except Exception as e:
+            logger.warning(f"[FinshareFetcher] 重试处理器配置失败: {e}")
+
+    return _FINSHARE_RETRY_HANDLER
 
 
 class FinshareFetcher(BaseFetcher):
@@ -61,6 +104,10 @@ class FinshareFetcher(BaseFetcher):
 
             self._fs = fs
             self._initialized = True
+
+            # 配置 finshare 重试次数
+            _get_finshare_retry_handler()
+
             logger.info("[FinshareFetcher] Finshare 初始化成功")
         except ImportError:
             logger.warning(
@@ -112,7 +159,8 @@ class FinshareFetcher(BaseFetcher):
         将 Finshare 返回的数据标准化为统一格式：
         ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']
         """
-        df = df.copy()
+        # 使用浅拷贝：只重命名列，不修改原有数值
+        df = df.copy(deep=False)
 
         # Finshare 返回的列名映射
         column_mapping = {

@@ -358,19 +358,14 @@ class CryptoNewsFetcher:
         """
         try:
             client = get_http_client()
-            if client:
-                response = client.post(
-                    f"{QVERIS_BASE_URL}/search",
-                    headers=self._get_headers(),
-                    json={"query": query, "limit": limit},
-                )
-            else:
-                with httpx.Client(timeout=QVERIS_TIMEOUT) as temp_client:
-                    response = temp_client.post(
-                        f"{QVERIS_BASE_URL}/search",
-                        headers=self._get_headers(),
-                        json={"query": query, "limit": limit},
-                    )
+            if not client:
+                logger.warning("[CryptoNewsFetcher] HTTP 客户端不可用")
+                return {}
+            response = client.post(
+                f"{QVERIS_BASE_URL}/search",
+                headers=self._get_headers(),
+                json={"query": query, "limit": limit},
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -398,29 +393,19 @@ class CryptoNewsFetcher:
         """
         try:
             client = get_http_client()
-            if client:
-                response = client.post(
-                    f"{QVERIS_BASE_URL}/tools/execute",
-                    params={"tool_id": tool_id},
-                    headers=self._get_headers(),
-                    json={
-                        "search_id": search_id,
-                        "parameters": parameters,
-                        "max_response_size": max_response_size,
-                    },
-                )
-            else:
-                with httpx.Client(timeout=QVERIS_TIMEOUT) as temp_client:
-                    response = temp_client.post(
-                        f"{QVERIS_BASE_URL}/tools/execute",
-                        params={"tool_id": tool_id},
-                        headers=self._get_headers(),
-                        json={
-                            "search_id": search_id,
-                            "parameters": parameters,
-                            "max_response_size": max_response_size,
-                        },
-                    )
+            if not client:
+                logger.warning("[CryptoNewsFetcher] HTTP 客户端不可用")
+                return {"success": False, "error_message": "HTTP client unavailable"}
+            response = client.post(
+                f"{QVERIS_BASE_URL}/tools/execute",
+                params={"tool_id": tool_id},
+                headers=self._get_headers(),
+                json={
+                    "search_id": search_id,
+                    "parameters": parameters,
+                    "max_response_size": max_response_size,
+                },
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
