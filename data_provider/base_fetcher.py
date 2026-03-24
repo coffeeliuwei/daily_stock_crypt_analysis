@@ -12,6 +12,7 @@ import logging
 import random
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -21,6 +22,24 @@ from .exceptions import DataFetchError
 from .utils import summarize_exception, STANDARD_COLUMNS
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FetcherCapabilities:
+    """
+    数据源能力声明
+
+    用于标识数据源支持的功能特性，帮助系统智能选择数据源
+    """
+
+    supports_bulk_query: bool = False  # 是否支持批量查询（多只股票一次请求）
+    supports_full_snapshot: bool = False  # 是否支持全量快照（全市场一次请求）
+    supports_single_query: bool = True  # 是否支持单股票查询
+    supports_realtime: bool = False  # 是否支持实时行情
+    supports_history: bool = True  # 是否支持历史数据
+    supports_chip_distribution: bool = False  # 是否支持筹码分布
+    bulk_max_count: int = 0  # 批量查询最大数量(0=无限制)
+    is_lightweight: bool = False  # 是否轻量级（优先使用）
 
 
 class BaseFetcher(ABC):
@@ -39,6 +58,15 @@ class BaseFetcher(ABC):
 
     name: str = "BaseFetcher"
     priority: int = 99  # 优先级数字越小越优先
+    capabilities: FetcherCapabilities = FetcherCapabilities()  # 数据源能力声明
+
+    def can_bulk_query(self) -> bool:
+        """检查是否支持批量查询"""
+        return self.capabilities.supports_bulk_query
+
+    def is_lightweight(self) -> bool:
+        """检查是否为轻量级数据源"""
+        return self.capabilities.is_lightweight
 
     @abstractmethod
     def _fetch_raw_data(

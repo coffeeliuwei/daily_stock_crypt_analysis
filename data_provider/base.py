@@ -1349,20 +1349,16 @@ class DataFetcherManager:
         """
         批量预取实时行情数据（在分析开始前调用）
 
-        策略：
-        1. 检查优先级中是否包含全量拉取数据源（efinance/akshare_em）
-        2. 如果不包含，跳过预取（新浪/腾讯是单股票查询，无需预取）
-        3. 如果自选股数量 >= 5 且使用全量数据源，则预取填充缓存
-
-        这样做的好处：
-        - 使用新浪/腾讯时：每只股票独立查询，无全量拉取问题
-        - 使用 efinance/东财时：预取一次，后续缓存命中
+        新策略（使用智能批量查询）：
+        1. 调用 get_realtime_quotes_for_stocks 进行智能批量查询
+        2. 自动选择最优数据源：Tencent批量(60只/批) -> Sina批量(100只/批) -> EM全量 -> 单股票降级
+        3. 无需区分数据源类型，统一由智能策略处理
 
         Args:
             stock_codes: 待分析的股票代码列表
 
         Returns:
-            预取的股票数量（0 表示跳过预取）
+            成功预取的股票数量
         """
         # Normalize all codes
         stock_codes = [normalize_stock_code(c) for c in stock_codes]
@@ -1381,46 +1377,23 @@ class DataFetcherManager:
             logger.debug("[预取] 实时行情功能已禁用，跳过预取")
             return 0
 
-        # 检查优先级中是否包含全量拉取数据源
-        # 注意：新增全量接口（如 tushare_realtime）时需同步更新此列表
-        # 全量接口特征：一次 API 调用拉取全市场 5000+ 股票数据
-        priority = config.realtime_source_priority.lower()
-        bulk_sources = ["efinance", "akshare_em", "tushare"]  # 全量接口列表
-
-        # 如果优先级中前两个都不是全量数据源，跳过预取
-        # 因为新浪/腾讯是单股票查询，不需要预取
-        priority_list = [s.strip() for s in priority.split(",")]
-        first_bulk_source_index = None
-        for i, source in enumerate(priority_list):
-            if source in bulk_sources:
-                first_bulk_source_index = i
-                break
-
-        # 如果没有全量数据源，或者全量数据源排在第 3 位之后，跳过预取
-        if first_bulk_source_index is None or first_bulk_source_index >= 2:
-            logger.info(f"[预取] 当前优先级使用轻量级数据源(sina/tencent)，无需预取")
-            return 0
-
-        # 如果股票数量少于 5 个，不进行批量预取（逐个查询更高效）
-        if len(stock_codes) < 5:
-            logger.info(f"[预取] 股票数量 {len(stock_codes)} < 5，跳过批量预取")
+        # 如果股票数量少于 2 个，不进行批量预取
+        if len(stock_codes) < 2:
+            logger.debug(f"[预取] 股票数量 {len(stock_codes)} < 2，跳过批量预取")
             return 0
 
         logger.info(f"[预取] 开始批量预取实时行情，共 {len(stock_codes)} 只股票...")
 
-        # 尝试通过 efinance 或 akshare 预取
-        # 只需要调用一次 get_realtime_quote，缓存机制会自动拉取全市场数据
         try:
-            # 用第一只股票触发全量拉取
-            first_code = stock_codes[0]
-            quote = self.get_realtime_quote(first_code)
+            # 使用新的智能批量查询方法
+            results = self.get_realtime_quotes_for_stocks(stock_codes)
 
-            if quote:
-                logger.info(f"[预取] 批量预取完成，缓存已填充")
-                return len(stock_codes)
-            else:
-                logger.warning(f"[预取] 批量预取失败，将使用逐个查询模式")
-                return 0
+            success_count = sum(1 for v in results.values() if v is not None)
+            logger.info(
+                f"[预取] 批量预取完成，成功 {success_count}/{len(stock_codes)} 只股票"
+            )
+
+            return success_count
 
         except Exception as e:
             logger.error(f"[预取] 批量预取异常: {e}")
@@ -1651,6 +1624,95 @@ class DataFetcherManager:
             logger.warning(f"[实时行情] {stock_code} 无可用数据源")
 
         return None
+
+    def get_realtime_quotes_for_stocks(
+        self, stock_codes: List[str]
+    ) -> Dict[str, Optional["UnifiedRealtimeQuote"]]:
+        """
+        批量获取实时行情（智能策略）
+
+        优先级:
+        1. AkshareFetcher 批量查询（Tencent 60只/批 -> Sina 100只/批）
+        2. EM 全量快照（重量级，有缓存）
+        3. 单股票降级（逐只查询）
+
+        Args:
+            stock_codes: 股票代码列表
+
+        Returns:
+            {stock_code: UnifiedRealtimeQuote} 字典，失败的股票值为 None
+        """
+        if not stock_codes:
+            return {}
+
+        results: Dict[str, Optional["UnifiedRealtimeQuote"]] = {}
+        remaining_codes = [normalize_stock_code(c) for c in stock_codes]
+
+        # ===== 策略 1: 尝试 AkshareFetcher 的批量查询 =====
+        for fetcher in self._fetchers:
+            if fetcher.name != "AkshareFetcher":
+                continue
+            if not hasattr(fetcher, "get_realtime_quotes_bulk"):
+                continue
+
+            try:
+                logger.info(
+                    f"[批量查询] 使用 AkshareFetcher 批量查询 {len(remaining_codes)} 只股票"
+                )
+                batch_results = fetcher.get_realtime_quotes_bulk(
+                    remaining_codes, source="tencent"
+                )
+                results.update(batch_results)
+                remaining_codes = [
+                    c for c in remaining_codes if c not in results or results[c] is None
+                ]
+
+                if not remaining_codes:
+                    break
+            except Exception as e:
+                logger.warning(f"[批量查询] AkshareFetcher 失败: {e}")
+
+        # ===== 策略 2: EM 全量快照（有缓存） =====
+        if remaining_codes:
+            logger.info(f"[EM降级] 对 {len(remaining_codes)} 只股票尝试 EM 全量快照")
+            for fetcher in self._fetchers:
+                if fetcher.name != "AkshareFetcher":
+                    continue
+                for code in remaining_codes:
+                    try:
+                        quote = fetcher.get_realtime_quote(code, source="em")
+                        if quote:
+                            results[code] = quote
+                    except Exception as e:
+                        logger.debug(f"[EM降级] {code} 获取失败: {e}")
+                remaining_codes = [
+                    c for c in remaining_codes if c not in results or results[c] is None
+                ]
+                break
+
+        # ===== 策略 3: 单股票降级 =====
+        if remaining_codes:
+            logger.info(f"[单股票降级] 对 {len(remaining_codes)} 只股票进行逐个查询")
+            for code in remaining_codes:
+                try:
+                    quote = self.get_realtime_quote(code)
+                    results[code] = quote
+                except Exception as e:
+                    logger.warning(f"[单股票降级] {code} 获取失败: {e}")
+                    results[code] = None
+
+        # 确保所有请求的代码都有返回值
+        for code in stock_codes:
+            normalized = normalize_stock_code(code)
+            if normalized not in results:
+                results[normalized] = None
+
+        success_count = sum(1 for v in results.values() if v is not None)
+        logger.info(
+            f"[智能批量查询] 完成，成功 {success_count}/{len(stock_codes)} 只股票"
+        )
+
+        return results
 
     # Fields worth supplementing from secondary sources when the primary
     # source returns None for them. Ordered by importance.

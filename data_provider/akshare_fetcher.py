@@ -26,6 +26,7 @@ AkshareFetcher - 主数据源 (Priority 1)
 import logging
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -73,6 +74,11 @@ logger = logging.getLogger(__name__)
 
 SINA_REALTIME_ENDPOINT = "hq.sinajs.cn/list"
 TENCENT_REALTIME_ENDPOINT = "qt.gtimg.cn/q"
+
+# 批量查询常量
+SINA_BULK_MAX_SIZE = 100  # Sina API 单次最大股票数量（保守值，实测上限约140）
+TENCENT_BULK_MAX_SIZE = 60  # Tencent API 单次最大股票数量
+BULK_REQUEST_DELAY = 0.5  # 批次间延迟(秒)，避免限流
 
 
 # User-Agent 池，用于随机轮换
@@ -1994,6 +2000,373 @@ class AkshareFetcher(BaseFetcher):
 
         except Exception as e:
             logger.debug(f"[AkshareFetcher] 获取股票名称失败 {stock_code}: {e}")
+            return None
+
+    # ==================== 批量查询方法 ====================
+
+    def get_realtime_quotes_bulk(
+        self, stock_codes: List[str], source: str = "tencent"
+    ) -> Dict[str, Optional[UnifiedRealtimeQuote]]:
+        """
+        批量获取实时行情（智能分批循环读取）
+
+        优先级: Tencent(60/批) > Sina(100/批) > EM全量 > 单股票降级
+
+        Args:
+            stock_codes: 股票代码列表
+            source: 优先使用的数据源 ("tencent" 或 "sina")
+
+        Returns:
+            {stock_code: UnifiedRealtimeQuote} 字典，失败的股票值为 None
+        """
+        if not stock_codes:
+            return {}
+
+        # 过滤非 A 股代码（美股/港股/ETF 单独处理）
+        cn_codes = []
+        special_codes = []  # 美股/港股/ETF
+        for c in stock_codes:
+            code = normalize_stock_code(c)
+            if _is_us_code(code) or _is_hk_code(code) or _is_etf_code(code):
+                special_codes.append(code)
+            else:
+                cn_codes.append(code)
+
+        results: Dict[str, Optional[UnifiedRealtimeQuote]] = {}
+        remaining_codes = list(cn_codes)
+
+        # ===== 策略 1: Tencent 批量查询 =====
+        if remaining_codes:
+            tencent_results = self.get_realtime_quotes_bulk_tencent(remaining_codes)
+            if tencent_results:
+                results.update(tencent_results)
+                remaining_codes = [
+                    c for c in remaining_codes if c not in results or results[c] is None
+                ]
+
+        # ===== 策略 2: Sina 批量查询 =====
+        if remaining_codes:
+            sina_results = self.get_realtime_quotes_bulk_sina(remaining_codes)
+            if sina_results:
+                results.update(sina_results)
+                remaining_codes = [
+                    c for c in remaining_codes if c not in results or results[c] is None
+                ]
+
+        # ===== 策略 3: EM 全量快照（有缓存） =====
+        if remaining_codes:
+            for code in remaining_codes:
+                try:
+                    quote = self._get_stock_realtime_quote_em(code)
+                    results[code] = quote
+                except Exception as e:
+                    logger.warning(f"[EM降级] {code} 获取失败: {e}")
+                    results[code] = None
+
+        # ===== 策略 4: 单股票降级 =====
+        final_remaining = [
+            c for c in cn_codes if c not in results or results[c] is None
+        ]
+        if final_remaining:
+            logger.info(f"[单股票降级] 对 {len(final_remaining)} 只股票进行逐个查询")
+            for code in final_remaining:
+                try:
+                    quote = self.get_realtime_quote(code)
+                    results[code] = quote
+                except Exception as e:
+                    logger.warning(f"[单股票降级] {code} 获取失败: {e}")
+                    results[code] = None
+
+        # 处理特殊代码（美股/港股/ETF）
+        for code in special_codes:
+            try:
+                quote = self.get_realtime_quote(code)
+                results[code] = quote
+            except Exception as e:
+                logger.warning(f"[特殊代码] {code} 获取失败: {e}")
+                results[code] = None
+
+        # 确保所有请求的代码都有返回值
+        for code in stock_codes:
+            normalized = normalize_stock_code(code)
+            if normalized not in results:
+                results[normalized] = None
+
+        success_count = sum(1 for v in results.values() if v is not None)
+        logger.info(f"[批量查询] 完成，成功 {success_count}/{len(stock_codes)} 只股票")
+
+        return results
+
+    def get_realtime_quotes_bulk_tencent(
+        self, stock_codes: List[str]
+    ) -> Dict[str, Optional[UnifiedRealtimeQuote]]:
+        """
+        Tencent 批量查询实现（分批循环读取）
+
+        单次请求最多 60 只股票，超出则分批请求
+
+        Args:
+            stock_codes: 股票代码列表
+
+        Returns:
+            {stock_code: UnifiedRealtimeQuote} 字典
+        """
+        if not stock_codes:
+            return {}
+
+        results: Dict[str, Optional[UnifiedRealtimeQuote]] = {}
+        total_count = len(stock_codes)
+
+        # 分批处理
+        for batch_idx in range(0, total_count, TENCENT_BULK_MAX_SIZE):
+            batch = stock_codes[batch_idx : batch_idx + TENCENT_BULK_MAX_SIZE]
+            batch_num = batch_idx // TENCENT_BULK_MAX_SIZE + 1
+            total_batches = (
+                total_count + TENCENT_BULK_MAX_SIZE - 1
+            ) // TENCENT_BULK_MAX_SIZE
+
+            logger.info(
+                f"[Tencent批量] 正在处理第 {batch_num}/{total_batches} 批，共 {len(batch)} 只股票"
+            )
+
+            try:
+                # 构建 URL: qt.gtimg.cn/q=sh600519,sz000001,...
+                symbols = [_to_sina_tx_symbol(c) for c in batch]
+                url = f"http://{TENCENT_REALTIME_ENDPOINT}={','.join(symbols)}"
+
+                # 请求
+                self._enforce_rate_limit()
+                headers = {
+                    "Referer": "http://finance.qq.com",
+                    "User-Agent": random.choice(USER_AGENTS),
+                }
+                api_start = time.time()
+                response = requests.get(url, headers=headers, timeout=10)
+                response.encoding = "gbk"
+                api_elapsed = time.time() - api_start
+
+                if response.status_code != 200:
+                    logger.warning(f"[Tencent批量] HTTP {response.status_code}")
+                    for code in batch:
+                        results[code] = None
+                    continue
+
+                # 解析返回的多只股票数据
+                # 格式: v_sh600519="1~贵州茅台~600519~...";v_sz000001="...";
+                content = response.text.strip()
+                for line in content.split(";"):
+                    if not line or '=""' in line:
+                        continue
+
+                    # 解析 v_sh600519="..."
+                    match = re.match(r'v_(\w+)="(.*)"', line.strip())
+                    if not match:
+                        continue
+
+                    symbol = match.group(1)  # 如 sh600519
+                    data_str = match.group(2)
+
+                    # 提取股票代码
+                    stock_code = (
+                        symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
+                    )
+
+                    # 解析数据 (用 ~ 分隔)
+                    fields = data_str.split("~")
+                    if len(fields) >= 45:
+                        quote = self._parse_tencent_quote_fields(stock_code, fields)
+                        results[stock_code] = quote
+                    else:
+                        results[stock_code] = None
+
+                # 标记未返回的股票为 None
+                for code in batch:
+                    if code not in results:
+                        results[code] = None
+
+                success_count = sum(1 for c in batch if results.get(c) is not None)
+                logger.info(
+                    f"[Tencent批量] 第 {batch_num} 批完成，成功 {success_count}/{len(batch)}，耗时 {api_elapsed:.2f}s"
+                )
+
+                # 批次间延迟（避免限流）
+                if batch_idx + TENCENT_BULK_MAX_SIZE < total_count:
+                    time.sleep(BULK_REQUEST_DELAY)
+
+            except Exception as e:
+                logger.error(f"[Tencent批量] 请求失败: {e}")
+                for code in batch:
+                    if code not in results:
+                        results[code] = None
+
+        return results
+
+    def get_realtime_quotes_bulk_sina(
+        self, stock_codes: List[str]
+    ) -> Dict[str, Optional[UnifiedRealtimeQuote]]:
+        """
+        Sina 批量查询实现（分批循环读取）
+
+        单次请求最多 100 只股票，超出则分批请求
+
+        Args:
+            stock_codes: 股票代码列表
+
+        Returns:
+            {stock_code: UnifiedRealtimeQuote} 字典
+        """
+        if not stock_codes:
+            return {}
+
+        results: Dict[str, Optional[UnifiedRealtimeQuote]] = {}
+        total_count = len(stock_codes)
+
+        # 分批处理
+        for batch_idx in range(0, total_count, SINA_BULK_MAX_SIZE):
+            batch = stock_codes[batch_idx : batch_idx + SINA_BULK_MAX_SIZE]
+            batch_num = batch_idx // SINA_BULK_MAX_SIZE + 1
+            total_batches = (total_count + SINA_BULK_MAX_SIZE - 1) // SINA_BULK_MAX_SIZE
+
+            logger.info(
+                f"[Sina批量] 正在处理第 {batch_num}/{total_batches} 批，共 {len(batch)} 只股票"
+            )
+
+            try:
+                # 构建 URL: hq.sinajs.cn/list=sh600519,sz000001,...
+                symbols = [_to_sina_tx_symbol(c) for c in batch]
+                url = f"http://{SINA_REALTIME_ENDPOINT}={','.join(symbols)}"
+
+                # 请求
+                self._enforce_rate_limit()
+                headers = {
+                    "Referer": "http://finance.sina.com.cn",
+                    "User-Agent": random.choice(USER_AGENTS),
+                }
+                api_start = time.time()
+                response = requests.get(url, headers=headers, timeout=10)
+                response.encoding = "gbk"
+                api_elapsed = time.time() - api_start
+
+                if response.status_code != 200:
+                    logger.warning(f"[Sina批量] HTTP {response.status_code}")
+                    for code in batch:
+                        results[code] = None
+                    continue
+
+                # 解析返回的多只股票数据
+                # 格式: var hq_str_sh600519="...";var hq_str_sz000001="...";
+                content = response.text.strip()
+                for line in content.split(";"):
+                    if not line or '=""' in line:
+                        continue
+
+                    # 解析 var hq_str_sh600519="..."
+                    match = re.match(r'var hq_str_(\w+)="(.*)"', line.strip())
+                    if not match:
+                        continue
+
+                    symbol = match.group(1)  # 如 sh600519
+                    data_str = match.group(2)
+
+                    # 提取股票代码
+                    stock_code = (
+                        symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
+                    )
+
+                    # 解析数据
+                    fields = data_str.split(",")
+                    if len(fields) >= 32:
+                        quote = self._parse_sina_quote_fields(stock_code, fields)
+                        results[stock_code] = quote
+                    else:
+                        results[stock_code] = None
+
+                # 标记未返回的股票为 None
+                for code in batch:
+                    if code not in results:
+                        results[code] = None
+
+                success_count = sum(1 for c in batch if results.get(c) is not None)
+                logger.info(
+                    f"[Sina批量] 第 {batch_num} 批完成，成功 {success_count}/{len(batch)}，耗时 {api_elapsed:.2f}s"
+                )
+
+                # 批次间延迟（避免限流）
+                if batch_idx + SINA_BULK_MAX_SIZE < total_count:
+                    time.sleep(BULK_REQUEST_DELAY)
+
+            except Exception as e:
+                logger.error(f"[Sina批量] 请求失败: {e}")
+                for code in batch:
+                    if code not in results:
+                        results[code] = None
+
+        return results
+
+    def _parse_tencent_quote_fields(
+        self, stock_code: str, fields: List[str]
+    ) -> Optional[UnifiedRealtimeQuote]:
+        """解析 Tencent 返回的数据字段"""
+        try:
+            return UnifiedRealtimeQuote(
+                code=stock_code,
+                name=fields[1] if len(fields) > 1 else "",
+                source=RealtimeSource.TENCENT,
+                price=safe_float(fields[3]) if len(fields) > 3 else None,
+                change_pct=safe_float(fields[32]) if len(fields) > 32 else None,
+                change_amount=safe_float(fields[31]) if len(fields) > 31 else None,
+                volume=safe_int(fields[6]) * 100
+                if len(fields) > 6 and fields[6]
+                else None,  # 手->股
+                amount=safe_float(fields[37]) * 10000
+                if len(fields) > 37 and fields[37]
+                else None,  # 万->元
+                open_price=safe_float(fields[5]) if len(fields) > 5 else None,
+                high=safe_float(fields[33]) if len(fields) > 33 else None,
+                low=safe_float(fields[34]) if len(fields) > 34 else None,
+                pre_close=safe_float(fields[4]) if len(fields) > 4 else None,
+                turnover_rate=safe_float(fields[38]) if len(fields) > 38 else None,
+                amplitude=safe_float(fields[43]) if len(fields) > 43 else None,
+                volume_ratio=safe_float(fields[49]) if len(fields) > 49 else None,
+                pe_ratio=safe_float(fields[39]) if len(fields) > 39 else None,
+                pb_ratio=safe_float(fields[46]) if len(fields) > 46 else None,
+                circ_mv=safe_float(fields[44]) * 100000000
+                if len(fields) > 44 and fields[44]
+                else None,  # 亿->元
+                total_mv=safe_float(fields[45]) * 100000000
+                if len(fields) > 45 and fields[45]
+                else None,  # 亿->元
+            )
+        except Exception as e:
+            logger.debug(f"[Tencent解析] {stock_code} 解析失败: {e}")
+            return None
+
+    def _parse_sina_quote_fields(
+        self, stock_code: str, fields: List[str]
+    ) -> Optional[UnifiedRealtimeQuote]:
+        """解析 Sina 返回的数据字段"""
+        try:
+            price = safe_float(fields[3]) if len(fields) > 3 else None
+            pre_close = safe_float(fields[2]) if len(fields) > 2 else None
+            change_pct = None
+            if price and pre_close and pre_close > 0:
+                change_pct = ((price - pre_close) / pre_close) * 100
+
+            return UnifiedRealtimeQuote(
+                code=stock_code,
+                name=fields[0] if len(fields) > 0 else "",
+                source=RealtimeSource.AKSHARE_SINA,
+                price=price,
+                change_pct=change_pct,
+                volume=safe_int(fields[8]) if len(fields) > 8 else None,
+                amount=safe_float(fields[9]) if len(fields) > 9 else None,
+                open_price=safe_float(fields[1]) if len(fields) > 1 else None,
+                high=safe_float(fields[4]) if len(fields) > 4 else None,
+                low=safe_float(fields[5]) if len(fields) > 5 else None,
+                pre_close=pre_close,
+            )
+        except Exception as e:
+            logger.debug(f"[Sina解析] {stock_code} 解析失败: {e}")
             return None
 
 
