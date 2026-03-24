@@ -39,7 +39,17 @@ class ModelSelectionMode(Enum):
 
 @dataclass
 class ModelHealth:
-    """模型健康状态"""
+    """模型健康状态（内存优化：使用 __slots__）"""
+
+    __slots__ = (
+        "name",
+        "health_score",
+        "failure_count",
+        "success_count",
+        "avg_latency",
+        "total_requests",
+        "last_error",
+    )
 
     name: str
     health_score: float = 1.0  # 健康分数 0-1
@@ -52,7 +62,15 @@ class ModelHealth:
 
 @dataclass
 class ModelPoolConfig:
-    """模型池配置"""
+    """模型池配置（内存优化：使用 __slots__）"""
+
+    __slots__ = (
+        "selection_mode",
+        "health_decay",
+        "health_recovery",
+        "min_health_score",
+        "latency_weight",
+    )
 
     selection_mode: ModelSelectionMode = ModelSelectionMode.RANDOM
     health_decay: float = 0.1  # 失败时健康分衰减
